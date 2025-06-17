@@ -8,14 +8,14 @@ from PyQt6.QtWidgets import (
     QStackedWidget, QWIDGETSIZE_MAX
 )
 from PyQt6.QtGui import QIcon, QPixmap, QAction, QTextCursor, QGuiApplication
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, QSize
 from server import Server
 import threading
 import json
 import sys
 
 class ServerCopilot(QMainWindow):
-    def __init__(self, window_width: int = 20, window_height: int = 5):
+    def __init__(self, window_width: int = 25, window_height: int = 25):
         super().__init__()
         self.message = None
         self.instance_locker = SingleInstance(self, "ServerCopilotMutex")
@@ -34,7 +34,7 @@ class ServerCopilot(QMainWindow):
         self.width = round(window_width/100 * QGuiApplication.primaryScreen().geometry().width())
         self.height = round(window_height/100 * QGuiApplication.primaryScreen().geometry().height())
         self.resize(self.width, self.height)
-        self.setFixedSize(self.size())
+        self.setFixedSize(self.width, self.height)
         self.tray = None
         self.new_content = []
         self.terminal_content = []
@@ -49,102 +49,171 @@ class ServerCopilot(QMainWindow):
         self.show()
 
     def init_ui(self):
-        self.button_height = 5*self.height // 12
+        self.button_height = round(1.2 * self.height // 12)
 
-        # Central widget and layout
         central = QWidget()
+        central.setStyleSheet("background-color: #121214;")
         self.setCentralWidget(central)
-        main_layout = QVBoxLayout(central)
+        main_layout = QHBoxLayout(central)
         main_layout.setContentsMargins(5, 5, 5, 5)
-        main_layout.setSpacing(3)
+        main_layout.setSpacing(0)
 
-        # Top settings bar
-        settings_layout = QHBoxLayout()
+        # Sidebar (vertical) with gray background
+        sidebar_widget = QWidget()
+        sidebar_widget.setStyleSheet("background-color: #121214;")
+        sidebar_layout = QVBoxLayout(sidebar_widget)
+        sidebar_layout.setSpacing(10)
+        sidebar_layout.setContentsMargins(0, 0, 5, 0)
+
+        # Common style for icon buttons
+        icon_button_style = """
+            QPushButton {
+                background-color: transparent;
+                border: none;
+                border-radius: %dpx;
+                padding: 0px;
+                text-align: left;
+            }
+            QPushButton[selected="true"] {
+                background-color: transparent;
+            }
+            QPushButton::before {
+                content: "";
+                display: none;
+            }
+            QPushButton[selected="true"]::before {
+                content: "";
+                display: inline-block;
+                width: 4px;
+                height: %dpx;
+                background: #fff;
+                border-radius: 2px;
+                margin-right: 8px;
+                margin-left: -8px;
+                vertical-align: middle;
+            }
+            QPushButton:hover::before {
+                content: "";
+                display: inline-block;
+                width: 4px;
+                height: %dpx;
+                background: #fff;
+                border-radius: 2px;
+                margin-right: 8px;
+                margin-left: -8px;
+                vertical-align: middle;
+                opacity: 0.5;
+            }
+            QPushButton:hover {
+                background-color: #29292b;
+            }
+        """ % (
+            int(self.button_height) // 7,
+            int(self.button_height * 0.7),  # full marker height
+            int(self.button_height * 0.35)  # half marker height
+        )
+
+        icon_size = int(self.button_height * 0.75)
+
+        # Helper to set selected tab
+        def set_selected_tab(selected_btn):
+            for btn in [self.fold_button, self.main_button, self.whitelist_button, self.settings_button]:
+                btn.setProperty("selected", btn is selected_btn)
+                btn.style().unpolish(btn)
+                btn.style().polish(btn)
+
+        # Fold button
         self.fold_button = QPushButton()
         self.fold_button.setIcon(QIcon(r"icon\unfold_icon_dark.png"))
         self.fold_button.setFixedSize(self.button_height, self.button_height)
+        self.fold_button.setIconSize(QSize(icon_size, icon_size))
         self.fold_button.setFlat(True)
-        self.fold_button.clicked.connect(self.unfold)
-        settings_layout.addWidget(self.fold_button)
+        self.fold_button.setStyleSheet(icon_button_style)
+        self.fold_button.clicked.connect(lambda: set_selected_tab(self.fold_button))
+        sidebar_layout.addWidget(self.fold_button)
 
-        # Whitelist and settings buttons
+        # Main tab button (server icon)
+        self.main_button = QPushButton()
+        if self.server.has_icon:
+            self.main_button.setIcon(QIcon(r"icon\server.ico"))
+        else:
+            self.main_button.setIcon(QIcon(r"icon\main_dark.ico"))
+        self.main_button.setFixedSize(self.button_height, self.button_height)
+        self.main_button.setIconSize(QSize(icon_size, icon_size))
+        self.main_button.setFlat(True)
+        self.main_button.setStyleSheet(icon_button_style)
+        self.main_button.clicked.connect(lambda: [
+            set_selected_tab(self.main_button),
+            self.stacked_widget.setCurrentIndex(0)
+        ])
+        sidebar_layout.addWidget(self.main_button)
+
+        # Whitelist tab button
         self.whitelist_button = QPushButton()
-        self.whitelist_button.setIcon(QIcon(r"icon\whitelist_on_icon_dark.png"))
+        if self.whitelist_type == "default":
+            self.whitelist_button.setIcon(QIcon(r"icon\whitelist_off_icon_dark.png"))
+        else:
+            self.whitelist_button.setIcon(QIcon(r"icon\whitelist_on_icon_dark.png"))
         self.whitelist_button.setFixedSize(self.button_height, self.button_height)
+        self.whitelist_button.setIconSize(QSize(icon_size, icon_size))
         self.whitelist_button.setFlat(True)
-        self.whitelist_button.clicked.connect(self.open_whitelist_menu)
-        self.whitelist_button.hide()
-        settings_layout.addWidget(self.whitelist_button)
+        self.whitelist_button.setStyleSheet(icon_button_style)
+        self.whitelist_button.clicked.connect(lambda: [
+            set_selected_tab(self.whitelist_button),
+            self.stacked_widget.setCurrentIndex(1)
+        ])
+        sidebar_layout.addWidget(self.whitelist_button)
 
+        sidebar_layout.addStretch()  # Pushes the settings button to the bottom
+
+        # Settings tab button (make it bigger)
         self.settings_button = QPushButton()
         self.settings_button.setIcon(QIcon(r"icon\settings_icon_dark.png"))
         self.settings_button.setFixedSize(self.button_height, self.button_height)
+        self.settings_button.setIconSize(QSize(icon_size, icon_size))
         self.settings_button.setFlat(True)
-        self.settings_button.hide()
-        settings_layout.addWidget(self.settings_button)
+        self.settings_button.setStyleSheet(icon_button_style)
+        self.settings_button.clicked.connect(lambda: [
+            set_selected_tab(self.settings_button),
+            self.stacked_widget.setCurrentIndex(2)
+        ])
+        sidebar_layout.addWidget(self.settings_button)
 
-        settings_layout.addStretch()
-        main_layout.addLayout(settings_layout)
+        # Set main tab as selected by default
+        set_selected_tab(self.main_button)
 
+        main_layout.addWidget(sidebar_widget)  # Add the sidebar widget
+
+        # Add a vertical separator
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.VLine)
+        separator.setFrameShadow(QFrame.Shadow.Plain)
+        separator.setLineWidth(1)
+        separator.setStyleSheet("color: #222225; background-color: #222225; min-width: 1px; max-width: 1px;")
+        main_layout.addWidget(separator)
+
+        # Stacked widget for main content
         self.stacked_widget = QStackedWidget()
-        main_layout.addWidget(self.stacked_widget, stretch=2)
+        self.stacked_widget.setStyleSheet("background-color: #121214;")
+        main_layout.addWidget(self.stacked_widget, stretch=1)
 
-        # Main Page Widget
+        # Main page
         self.main_page = QWidget()
         main_page_layout = QVBoxLayout(self.main_page)
-        main_page_layout.setContentsMargins(0, 0, 0, 0)
-        main_page_layout.setSpacing(8)
-
-        # Terminal output
-        self.server_terminal = QTextEdit()
-        self.server_terminal.setReadOnly(True)
-        self.server_terminal.hide()
-        main_page_layout.addWidget(self.server_terminal, stretch=2)
-
-        # Main buttons
-        button_layout = QHBoxLayout()
-        self.stop_button = QPushButton("Stop")
-        self.stop_button.setFixedHeight(self.button_height)
-        self.stop_button.clicked.connect(self.stop_server)
-        button_layout.addWidget(self.stop_button)
-
-        self.restart_button = QPushButton("Restart")
-        self.restart_button.setFixedHeight(self.button_height)
-        self.restart_button.clicked.connect(self.restart_server)
-        button_layout.addWidget(self.restart_button)
-
-        self.tray_button = QPushButton("Minimize")
-        self.tray_button.setFixedHeight(self.button_height)
-        self.tray_button.clicked.connect(self.minimize_to_tray)
-        button_layout.addWidget(self.tray_button)
-
-        main_page_layout.addLayout(button_layout)
-
+        # ... add widgets to main_page_layout ...
         self.stacked_widget.addWidget(self.main_page)
 
-        # Whitelist widget/page
-        self.whitelist = Whitelist(self)
+        # Whitelist page
         self.whitelist_page = QWidget()
         whitelist_page_layout = QVBoxLayout(self.whitelist_page)
-        whitelist_page_layout.setContentsMargins(0, 0, 0, 0)
-        whitelist_page_layout.setSpacing(8)
-        whitelist_page_layout.addWidget(self.whitelist)
-
-        # Whitelist
-        whitelist_entry_layout = QHBoxLayout()
-        self.whitelist_entry = QLineEdit()
-        self.whitelist_entry.setPlaceholderText("Name / UUID")
-        self.whitelist_entry.returnPressed.connect(self.change_player)
-        whitelist_entry_layout.addWidget(self.whitelist_entry)
-        self.whitelist_add_button = QPushButton("+")
-        self.whitelist_add_button.clicked.connect(self.add_player)
-        whitelist_entry_layout.addWidget(self.whitelist_add_button)
-        self.whitelist_remove_button = QPushButton("-")
-        self.whitelist_remove_button.clicked.connect(self.remove_player)
-        whitelist_entry_layout.addWidget(self.whitelist_remove_button)
-        whitelist_page_layout.addLayout(whitelist_entry_layout)
-
+        # ... add widgets to whitelist_page_layout ...
         self.stacked_widget.addWidget(self.whitelist_page)
+
+        # Settings page
+        self.settings_page = QWidget()
+        settings_page_layout = QVBoxLayout(self.settings_page)
+        # ... add widgets to settings_page_layout ...
+        self.stacked_widget.addWidget(self.settings_page)
 
     def change_player(self):
         id = self.whitelist_entry.text().strip()
@@ -401,5 +470,5 @@ def get_terminal_output(app):
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     copilot = ServerCopilot()
-    copilot.start_server()
+    # copilot.start_server()
     sys.exit(app.exec())
