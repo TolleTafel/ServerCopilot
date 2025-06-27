@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QTextEdit, QLabel, QMenu, QGridLayout, QLineEdit, QFrame, QWidgetAction, QSystemTrayIcon,
     QStackedWidget, QWIDGETSIZE_MAX
 )
-from PyQt6.QtGui import QIcon, QPixmap, QAction, QTextCursor, QGuiApplication
+from PyQt6.QtGui import QIcon, QPixmap, QAction, QTextCursor, QGuiApplication, QFontDatabase
 from PyQt6.QtCore import Qt, QTimer, QSize
 from server import Server
 import threading
@@ -34,6 +34,7 @@ class ServerCopilot(QMainWindow):
         self.setWindowTitle(self.server.name)
         self.icon_folder = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "icon"))
         self.data_folder = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data"))
+        self.font_folder = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "fonts"))
         self.setWindowIcon(QIcon(os.path.join(self.icon_folder, "server.ico")) if self.server.has_icon else QIcon(os.path.join(self.icon_folder, "main_dark.ico")))
         self.width = round(window_width/100 * QGuiApplication.primaryScreen().geometry().width())
         self.height = round(window_height/100 * QGuiApplication.primaryScreen().geometry().height())
@@ -44,28 +45,50 @@ class ServerCopilot(QMainWindow):
         self.terminal_content = []
         self.scrollbar_guardian = True
         self.minimize_guardian = False
-        self.folded_in = True  # Start folded
+        self.folded_in = True
         self.fold_after_exit = False
         self.terminate_thread = False
         self.terminal_thread = None
+        self.custom_font_family = "Arial"
+        font_id = QFontDatabase.addApplicationFont(os.path.join(self.font_folder, "Not-Bower-Bold.ttf"))
+        if font_id != -1:
+            font_families = QFontDatabase.applicationFontFamilies(font_id)
+            if font_families:
+                self.custom_font_family = font_families[0]
+        else:
+            print("Failed to load Not-Bower-Bold.ttf font file")
 
         self.init_ui()
-        self.fold_in()  # Start in folded state
+        self.fold_in()
         self.show()
 
     def init_ui(self):
         self.button_height = round(1.2 * self.height // 12)
+        self.button_width = round((self.width - self.button_height) // 2 - 26)
 
+        button_stylesheet = f"""
+            QPushButton {{
+                background-color: #262626;
+                border: none;
+                border-radius: 12px;
+                font-size: 18px;
+                font-family: "{self.custom_font_family}", Arial, sans-serif;
+            }}
+            QPushButton:hover {{
+                background-color: #3c3c3c;
+            }}
+        """
+        
         central = QWidget()
-        central.setStyleSheet("background-color: #121214;")
+        central.setStyleSheet("background-color: #1c1c1c;")
         self.setCentralWidget(central)
         main_layout = QHBoxLayout(central)
         main_layout.setContentsMargins(5, 5, 5, 5)
         main_layout.setSpacing(0)
 
-        # Sidebar (vertical) with gray background
+        # Sidebar
         sidebar_widget = QWidget()
-        sidebar_widget.setStyleSheet("background-color: #121214;")
+        sidebar_widget.setStyleSheet("background-color: #1c1c1c;")
         sidebar_layout = QVBoxLayout(sidebar_widget)
         sidebar_layout.setSpacing(10)
         sidebar_layout.setContentsMargins(0, 0, 0, 0)
@@ -75,7 +98,7 @@ class ServerCopilot(QMainWindow):
             for btn in [self.main_button, self.whitelist_button, self.settings_button]:
                 btn.setSelected(btn is selected_btn)
 
-        icon_size = int(self.button_height * 0.75)
+        icon_size = int(self.button_height * 0.82)
 
         # Fold button
         self.fold_button = QPushButton()
@@ -93,7 +116,7 @@ class ServerCopilot(QMainWindow):
                 background-color: #29292b;
             }
         """)
-        self.fold_button.clicked.connect(self.unfold)  # Connect to unfold by default
+        self.fold_button.clicked.connect(self.unfold)
         sidebar_layout.addWidget(self.fold_button)
 
         fold_container = QWidget()
@@ -110,7 +133,7 @@ class ServerCopilot(QMainWindow):
         self.main_button.button.setIconSize(QSize(icon_size, icon_size))
         self.main_button.button.clicked.connect(lambda: [
             set_selected_tab(self.main_button),
-            self.stacked_widget.setCurrentIndex(0)
+            self.stacked_widget.setCurrentIndex(1)
         ])
         sidebar_layout.addWidget(self.main_button)
 
@@ -124,7 +147,7 @@ class ServerCopilot(QMainWindow):
         self.whitelist_button.button.setIconSize(QSize(icon_size, icon_size))
         self.whitelist_button.button.clicked.connect(lambda: [
             set_selected_tab(self.whitelist_button),
-            self.stacked_widget.setCurrentIndex(1)
+            self.stacked_widget.setCurrentIndex(2)
         ])
         sidebar_layout.addWidget(self.whitelist_button)
 
@@ -137,7 +160,7 @@ class ServerCopilot(QMainWindow):
         self.settings_button.button.setIconSize(QSize(icon_size, icon_size))
         self.settings_button.button.clicked.connect(lambda: [
             set_selected_tab(self.settings_button),
-            self.stacked_widget.setCurrentIndex(2)
+            self.stacked_widget.setCurrentIndex(3)
         ])
         sidebar_layout.addWidget(self.settings_button)
         main_layout.addWidget(sidebar_widget)
@@ -145,16 +168,66 @@ class ServerCopilot(QMainWindow):
         # Seperator
         separator = QFrame()
         separator.setFrameShape(QFrame.Shape.VLine)
-        separator.setFrameShadow(QFrame.Shadow.Sunken)
         separator.setStyleSheet("color: #232326; background: #232326;")
         separator.setLineWidth(2)
         main_layout.addWidget(separator)
 
         # Create the stacked widget for main content
         self.stacked_widget = QStackedWidget()
-        main_page = QLabel("Main Page")
+
+        # Main page (folded)
+        main_page_folded = QWidget()
+        main_page_folded_layout = QHBoxLayout(main_page_folded)
+        main_page_folded_layout.setContentsMargins(5, 5, 5, 5)
+        main_page_folded_layout.setSpacing(5)
+        self.stop_button_folded = QPushButton("Stop")
+        self.stop_button_folded.setFixedSize(self.button_width, self.button_height)
+        self.stop_button_folded.clicked.connect(self.stop_server)
+        self.stop_button_folded.setStyleSheet(button_stylesheet)
+        main_page_folded_layout.addWidget(self.stop_button_folded, alignment=Qt.AlignmentFlag.AlignTop)
+        self.restart_button_folded = QPushButton("Restart")
+        self.restart_button_folded.setFixedSize(self.button_width, self.button_height)
+        self.restart_button_folded.setEnabled(False)
+        self.restart_button_folded.clicked.connect(self.restart_server)
+        self.restart_button_folded.setStyleSheet(button_stylesheet)
+        main_page_folded_layout.addWidget(self.restart_button_folded, alignment=Qt.AlignmentFlag.AlignTop)
+
+        # Main page (unfolded)
+        main_page = QWidget()
+        main_page_layout = QVBoxLayout(main_page)
+        main_page_layout.setContentsMargins(5, 5, 5, 5)
+        main_page_layout.setSpacing(5)
+        # Terminal
+        self.server_terminal = QTextEdit()
+        self.server_terminal.setReadOnly(True)
+        self.server_terminal.setFixedSize(self.width - self.button_height - 37, self.height - self.button_height - 25)
+        self.server_terminal.setStyleSheet(f"""QTextEdit {{
+                background-color: #262626;
+                font-family: "{self.custom_font_family}", Arial, sans-serif; 
+            }}""") # TODO
+        main_page_layout.addStretch()
+        # Buttons
+        button_layout = QHBoxLayout()
+        button_layout.setSpacing(5)
+        self.stop_button = QPushButton("Stop")
+        self.stop_button.setFixedSize(self.button_width, self.button_height)
+        self.stop_button.clicked.connect(self.stop_server)
+        self.stop_button.setStyleSheet(button_stylesheet)
+        button_layout.addWidget(self.stop_button)
+        self.restart_button = QPushButton("Restart")
+        self.restart_button.setFixedSize(self.button_width, self.button_height)
+        self.restart_button.setEnabled(False)
+        self.restart_button.clicked.connect(self.restart_server)
+        self.restart_button.setStyleSheet(button_stylesheet)
+        button_layout.addWidget(self.restart_button)
+        main_page_layout.addLayout(button_layout)
+
+        # Whitelist page
         whitelist_page = QLabel("Whitelist Page")
+
+        # Settings page
         settings_page = QLabel("Settings Page")
+        self.stacked_widget.addWidget(main_page_folded)
         self.stacked_widget.addWidget(main_page)
         self.stacked_widget.addWidget(whitelist_page)
         self.stacked_widget.addWidget(settings_page)
@@ -162,7 +235,7 @@ class ServerCopilot(QMainWindow):
 
         # Set main tab as selected by default
         set_selected_tab(self.main_button)
-        self.stacked_widget.setCurrentIndex(0)
+        self.stacked_widget.setCurrentIndex(1)
 
     def change_player(self):
         id = self.whitelist_entry.text().strip()
@@ -225,7 +298,6 @@ class ServerCopilot(QMainWindow):
             json.dump(settings, file, indent=4)
 
     def unfold(self):
-        screen_height = QGuiApplication.primaryScreen().geometry().height()
         self.setFixedSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX)
         self.resize(self.width, self.height)
         self.setFixedSize(self.size())
@@ -234,6 +306,7 @@ class ServerCopilot(QMainWindow):
             self.fold_button.clicked.disconnect()
         except TypeError:
             pass
+        self.stacked_widget.setCurrentIndex(self.last_tab_index)
         self.fold_button.clicked.connect(self.fold_in)
         self.folded_in = False
         self.main_button.show()
@@ -245,6 +318,8 @@ class ServerCopilot(QMainWindow):
         fold_height = self.fold_button.height() + 16  # 16 for padding/margin
         self.resize(self.width, fold_height)
         self.setFixedSize(self.size())
+        self.last_tab_index = self.stacked_widget.currentIndex()
+        self.stacked_widget.setCurrentIndex(0)
         self.fold_button.setIcon(QIcon(os.path.join(self.icon_folder, "unfold_icon_dark.png")))
         try:
             self.fold_button.clicked.disconnect()
@@ -255,7 +330,6 @@ class ServerCopilot(QMainWindow):
         self.main_button.hide()
         self.whitelist_button.hide()
         self.settings_button.hide()
-        # Optionally hide other widgets if needed
 
     def start_server(self):
         self.new_content.append("[ServerCopilot]: Starting your Server\n")
@@ -268,9 +342,11 @@ class ServerCopilot(QMainWindow):
         self.terminal_thread = threading.Thread(target=lambda: get_terminal_output(self), daemon=True)
         self.terminal_thread.start()
         self.stop_button.setText("Stop")
+        self.stop_button_folded.setText("Stop")
         self.stop_button.clicked.disconnect()
         self.stop_button.clicked.connect(self.stop_server)
         self.restart_button.setEnabled(True)
+        self.restart_button_folded.setEnabled(True)
         QTimer.singleShot(500, self.update_terminal)
 
     def stop_server(self):
@@ -286,9 +362,11 @@ class ServerCopilot(QMainWindow):
                 change_shortcut(self.shortcut_name, "server_dorment.ico", "Start " + self.server.name)
             self.setWindowIcon(QIcon(os.path.join(self.icon_folder, "main_dark.ico")) if not self.server.has_icon else QIcon(os.path.join(self.icon_folder, "server_dorment.ico")))
             self.stop_button.setText("Start")
+            self.stop_button_folded.setText("Start")
             self.stop_button.clicked.disconnect()
             self.stop_button.clicked.connect(self.start_server)
             self.restart_button.setEnabled(False)
+            self.restart_button_folded.setEnabled(False)
         else:
             QTimer.singleShot(500, self.stop_server)
 
@@ -422,5 +500,5 @@ def get_terminal_output(app):
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     copilot = ServerCopilot()
-    # copilot.start_server()
+    copilot.start_server()
     sys.exit(app.exec())

@@ -8,12 +8,12 @@ class SidebarButton(QPushButton):
         self._selected = False
         self._hovered = False
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setContentsMargins(3, 3, 3, 3)
+        self.setContentsMargins(5, 5, 5, 5)
         self.setStyleSheet("""
             QPushButton {
                 background-color: transparent;
                 border: none;
-                border-radius: 12px;
+                border-radius: 6px;
                 padding-left: 0px;
                 padding-right: 0px;
                 padding-top: 0px;
