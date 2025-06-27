@@ -28,7 +28,10 @@ def startup(app: QWidget) -> dict:
     """
     Main start for the ServerCopilot. Load saved data, check for new server name/icon and updates.
     """
-    filepath = os.path.join(os.path.dirname(__file__), "data", "saved.json")
+    base_folder = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    data_folder = os.path.join(base_folder, "data")
+    icon_folder = os.path.join(base_folder, "icon")
+    filepath = os.path.join(data_folder, "saved.json")
     with open(filepath, 'r') as file:
         data = json.load(file)
     server_filepath = data["filepath"]
@@ -36,11 +39,11 @@ def startup(app: QWidget) -> dict:
         icon_path = os.path.join(os.path.dirname(server_filepath), "world", "icon.png")
         if os.path.isfile(icon_path):
             icon = Image.open(icon_path)
-            icon.save(os.path.join("icon", "server.ico"), format='ICO')
+            icon.save(os.path.join(icon_folder, "server.ico"), format='ICO')
             grayscale_icon = icon.convert("L")
             if "icc_profile" in grayscale_icon.info:
                 grayscale_icon.info.pop("icc_profile")
-            grayscale_icon.save(os.path.join("icon", "server_dorment.ico"), format='ICO')
+            grayscale_icon.save(os.path.join(icon_folder, "server_dorment.ico"), format='ICO')
             return data
         else:
             return setup(app, "Couldn't find the saved server! Please reselect the server.jar", delete_previous=True)
@@ -51,7 +54,10 @@ def setup(app: QWidget, filedialog_title: str, delete_previous: bool = False) ->
     """
     Initialize the ServerCopilot when starting without a saved server filepath.
     """
-    filepath = os.path.join(os.path.dirname(__file__), "data", "saved.json")
+    base_folder = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    data_folder = os.path.join(base_folder, "data")
+    icon_folder = os.path.join(base_folder, "icon")
+    filepath = os.path.join(data_folder, "saved.json")
     # Use PyQt6 file dialog
     if app is not None:
         server_filepath, _ = QFileDialog.getOpenFileName(
@@ -69,11 +75,11 @@ def setup(app: QWidget, filedialog_title: str, delete_previous: bool = False) ->
         icon_path = os.path.join(server_name, "world", "icon.png")
         if os.path.isfile(icon_path):
             icon = Image.open(icon_path)
-            icon.save(os.path.join("icon", "server.ico"), format='ICO')
+            icon.save(os.path.join(icon_folder, "server.ico"), format='ICO')
             grayscale_icon = icon.convert("L")
             if "icc_profile" in grayscale_icon.info:
                 grayscale_icon.info.pop("icc_profile")
-            grayscale_icon.save(os.path.join("icon", "server_dorment.ico"), format='ICO')
+            grayscale_icon.save(os.path.join(icon_folder, "server_dorment.ico"), format='ICO')
         if delete_previous:
             print("Changing")
             with open(filepath, 'r') as file:
@@ -93,30 +99,36 @@ def create_shortcut(name: str, icon_name: str):
     Create a new shortcut on the Desktop
     """
     desktop = winshell.desktop()
+    base_folder = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    data_folder = os.path.join(base_folder, "data")
+    icon_folder = os.path.join(base_folder, "icon")
     path = os.path.join(desktop, name + ".lnk")
     directory = os.path.dirname(__file__)
     target = os.path.join(directory, "start_without_terminal.vbs")
-    icon = os.path.join(directory, "icon", icon_name)
+    icon = os.path.join(icon_folder, icon_name)
     
     with winshell.shortcut(path) as shortcut:
         shortcut.path = target
         shortcut.working_directory = directory
         shortcut.description = "Stop " + name
         shortcut.icon_location = (icon, 0)
-    edit_json_file(os.path.join(directory, "data", "saved.json"), "desktop_shortcut", name + ".lnk")
+    edit_json_file(os.path.join(data_folder, "saved.json"), "desktop_shortcut", name + ".lnk")
 
 def change_shortcut(old_name: str, icon_name: str, description: str, new_name: str = None):
     """
     Change the existing shortcut icon and optionally the name.
     """
     desktop = winshell.desktop()
+    base_folder = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    data_folder = os.path.join(base_folder, "data")
+    icon_folder = os.path.join(base_folder, "icon")
     old_path = os.path.join(desktop, old_name)
     if new_name:
         new_path = os.path.join(desktop, new_name + ".lnk")
-        edit_json_file(os.path.join(os.path.dirname(__file__), "data", "saved.json"), "desktop_shortcut", new_name + ".lnk")
+        edit_json_file(os.path.join(data_folder, "saved.json"), "desktop_shortcut", new_name + ".lnk")
     else:
         new_path = old_path
-    icon = os.path.join(os.path.dirname(__file__), "icon", icon_name)
+    icon = os.path.join(icon_folder, icon_name)
     
     if os.path.exists(old_path):
         with winshell.shortcut(old_path) as shortcut:

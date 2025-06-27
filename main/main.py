@@ -1,4 +1,5 @@
-from widgets import confirm_dialogue, widget_swap
+from widgets.confirm_dialogue import confirm_dialogue
+from widgets.sidebar_button import SidebarButtonWithMarker, SidebarButton
 from startup import startup, change_shortcut
 from instance_checker import SingleInstance
 from whitelist import Whitelist
@@ -13,6 +14,7 @@ from server import Server
 import threading
 import json
 import sys
+import os
 
 class ServerCopilot(QMainWindow):
     def __init__(self, window_width: int = 25, window_height: int = 25):
@@ -30,7 +32,9 @@ class ServerCopilot(QMainWindow):
         self.server = Server(self.data["filepath"])
         self.whitelist_type = self.data["whitelist"]
         self.setWindowTitle(self.server.name)
-        self.setWindowIcon(QIcon(r"icon\server.ico") if self.server.has_icon else QIcon(r"icon\main_dark.ico"))
+        self.icon_folder = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "icon"))
+        self.data_folder = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data"))
+        self.setWindowIcon(QIcon(os.path.join(self.icon_folder, "server.ico")) if self.server.has_icon else QIcon(os.path.join(self.icon_folder, "main_dark.ico")))
         self.width = round(window_width/100 * QGuiApplication.primaryScreen().geometry().width())
         self.height = round(window_height/100 * QGuiApplication.primaryScreen().geometry().height())
         self.resize(self.width, self.height)
@@ -40,12 +44,13 @@ class ServerCopilot(QMainWindow):
         self.terminal_content = []
         self.scrollbar_guardian = True
         self.minimize_guardian = False
-        self.folded_in = True
+        self.folded_in = True  # Start folded
         self.fold_after_exit = False
         self.terminate_thread = False
         self.terminal_thread = None
 
         self.init_ui()
+        self.fold_in()  # Start in folded state
         self.show()
 
     def init_ui(self):
@@ -63,102 +68,61 @@ class ServerCopilot(QMainWindow):
         sidebar_widget.setStyleSheet("background-color: #121214;")
         sidebar_layout = QVBoxLayout(sidebar_widget)
         sidebar_layout.setSpacing(10)
-        sidebar_layout.setContentsMargins(0, 0, 5, 0)
+        sidebar_layout.setContentsMargins(0, 0, 0, 0)
+        sidebar_widget.setFixedWidth(self.button_height + 16)
 
-        # Common style for icon buttons
-        icon_button_style = """
+        def set_selected_tab(selected_btn):
+            for btn in [self.main_button, self.whitelist_button, self.settings_button]:
+                btn.setSelected(btn is selected_btn)
+
+        icon_size = int(self.button_height * 0.75)
+
+        # Fold button
+        self.fold_button = QPushButton()
+        self.fold_button.setIcon(QIcon(os.path.join(self.icon_folder, "unfold_icon_dark.png")))
+        self.fold_button.setFixedSize(self.button_height, self.button_height)
+        self.fold_button.setIconSize(QSize(icon_size, icon_size))
+        self.fold_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.fold_button.setStyleSheet("""
             QPushButton {
                 background-color: transparent;
                 border: none;
-                border-radius: %dpx;
-                padding: 0px;
-                text-align: left;
-            }
-            QPushButton[selected="true"] {
-                background-color: transparent;
-            }
-            QPushButton::before {
-                content: "";
-                display: none;
-            }
-            QPushButton[selected="true"]::before {
-                content: "";
-                display: inline-block;
-                width: 4px;
-                height: %dpx;
-                background: #fff;
-                border-radius: 2px;
-                margin-right: 8px;
-                margin-left: -8px;
-                vertical-align: middle;
-            }
-            QPushButton:hover::before {
-                content: "";
-                display: inline-block;
-                width: 4px;
-                height: %dpx;
-                background: #fff;
-                border-radius: 2px;
-                margin-right: 8px;
-                margin-left: -8px;
-                vertical-align: middle;
-                opacity: 0.5;
+                border-radius: 12px;
             }
             QPushButton:hover {
                 background-color: #29292b;
             }
-        """ % (
-            int(self.button_height) // 7,
-            int(self.button_height * 0.7),  # full marker height
-            int(self.button_height * 0.35)  # half marker height
-        )
-
-        icon_size = int(self.button_height * 0.75)
-
-        # Helper to set selected tab
-        def set_selected_tab(selected_btn):
-            for btn in [self.fold_button, self.main_button, self.whitelist_button, self.settings_button]:
-                btn.setProperty("selected", btn is selected_btn)
-                btn.style().unpolish(btn)
-                btn.style().polish(btn)
-
-        # Fold button
-        self.fold_button = QPushButton()
-        self.fold_button.setIcon(QIcon(r"icon\unfold_icon_dark.png"))
-        self.fold_button.setFixedSize(self.button_height, self.button_height)
-        self.fold_button.setIconSize(QSize(icon_size, icon_size))
-        self.fold_button.setFlat(True)
-        self.fold_button.setStyleSheet(icon_button_style)
-        self.fold_button.clicked.connect(lambda: set_selected_tab(self.fold_button))
+        """)
+        self.fold_button.clicked.connect(self.unfold)  # Connect to unfold by default
         sidebar_layout.addWidget(self.fold_button)
 
+        fold_container = QWidget()
+        fold_layout = QHBoxLayout(fold_container)
+        fold_layout.setContentsMargins(0, 0, 0, 0)
+        fold_layout.setSpacing(0)
+        fold_layout.addWidget(self.fold_button)
+        sidebar_layout.addWidget(fold_container)
+
         # Main tab button (server icon)
-        self.main_button = QPushButton()
-        if self.server.has_icon:
-            self.main_button.setIcon(QIcon(r"icon\server.ico"))
-        else:
-            self.main_button.setIcon(QIcon(r"icon\main_dark.ico"))
+        self.main_button = SidebarButtonWithMarker(SidebarButton())
+        self.main_button.button.setIcon(QIcon(os.path.join(self.icon_folder, "terminal_icon_dark.png")))
         self.main_button.setFixedSize(self.button_height, self.button_height)
-        self.main_button.setIconSize(QSize(icon_size, icon_size))
-        self.main_button.setFlat(True)
-        self.main_button.setStyleSheet(icon_button_style)
-        self.main_button.clicked.connect(lambda: [
+        self.main_button.button.setIconSize(QSize(icon_size, icon_size))
+        self.main_button.button.clicked.connect(lambda: [
             set_selected_tab(self.main_button),
             self.stacked_widget.setCurrentIndex(0)
         ])
         sidebar_layout.addWidget(self.main_button)
 
         # Whitelist tab button
-        self.whitelist_button = QPushButton()
+        self.whitelist_button = SidebarButtonWithMarker(SidebarButton())
         if self.whitelist_type == "default":
-            self.whitelist_button.setIcon(QIcon(r"icon\whitelist_off_icon_dark.png"))
+            self.whitelist_button.button.setIcon(QIcon(os.path.join(self.icon_folder, "whitelist_off_icon_dark.png")))
         else:
-            self.whitelist_button.setIcon(QIcon(r"icon\whitelist_on_icon_dark.png"))
+            self.whitelist_button.button.setIcon(QIcon(os.path.join(self.icon_folder, "whitelist_on_icon_dark.png")))
         self.whitelist_button.setFixedSize(self.button_height, self.button_height)
-        self.whitelist_button.setIconSize(QSize(icon_size, icon_size))
-        self.whitelist_button.setFlat(True)
-        self.whitelist_button.setStyleSheet(icon_button_style)
-        self.whitelist_button.clicked.connect(lambda: [
+        self.whitelist_button.button.setIconSize(QSize(icon_size, icon_size))
+        self.whitelist_button.button.clicked.connect(lambda: [
             set_selected_tab(self.whitelist_button),
             self.stacked_widget.setCurrentIndex(1)
         ])
@@ -166,54 +130,39 @@ class ServerCopilot(QMainWindow):
 
         sidebar_layout.addStretch()  # Pushes the settings button to the bottom
 
-        # Settings tab button (make it bigger)
-        self.settings_button = QPushButton()
-        self.settings_button.setIcon(QIcon(r"icon\settings_icon_dark.png"))
+        # Settings tab button
+        self.settings_button = SidebarButtonWithMarker(SidebarButton())
+        self.settings_button.button.setIcon(QIcon(os.path.join(self.icon_folder, "settings_icon_dark.png")))
         self.settings_button.setFixedSize(self.button_height, self.button_height)
-        self.settings_button.setIconSize(QSize(icon_size, icon_size))
-        self.settings_button.setFlat(True)
-        self.settings_button.setStyleSheet(icon_button_style)
-        self.settings_button.clicked.connect(lambda: [
+        self.settings_button.button.setIconSize(QSize(icon_size, icon_size))
+        self.settings_button.button.clicked.connect(lambda: [
             set_selected_tab(self.settings_button),
             self.stacked_widget.setCurrentIndex(2)
         ])
         sidebar_layout.addWidget(self.settings_button)
+        main_layout.addWidget(sidebar_widget)
+
+        # Seperator
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.VLine)
+        separator.setFrameShadow(QFrame.Shadow.Sunken)
+        separator.setStyleSheet("color: #232326; background: #232326;")
+        separator.setLineWidth(2)
+        main_layout.addWidget(separator)
+
+        # Create the stacked widget for main content
+        self.stacked_widget = QStackedWidget()
+        main_page = QLabel("Main Page")
+        whitelist_page = QLabel("Whitelist Page")
+        settings_page = QLabel("Settings Page")
+        self.stacked_widget.addWidget(main_page)
+        self.stacked_widget.addWidget(whitelist_page)
+        self.stacked_widget.addWidget(settings_page)
+        main_layout.addWidget(self.stacked_widget)
 
         # Set main tab as selected by default
         set_selected_tab(self.main_button)
-
-        main_layout.addWidget(sidebar_widget)  # Add the sidebar widget
-
-        # Add a vertical separator
-        separator = QFrame()
-        separator.setFrameShape(QFrame.Shape.VLine)
-        separator.setFrameShadow(QFrame.Shadow.Plain)
-        separator.setLineWidth(1)
-        separator.setStyleSheet("color: #222225; background-color: #222225; min-width: 1px; max-width: 1px;")
-        main_layout.addWidget(separator)
-
-        # Stacked widget for main content
-        self.stacked_widget = QStackedWidget()
-        self.stacked_widget.setStyleSheet("background-color: #121214;")
-        main_layout.addWidget(self.stacked_widget, stretch=1)
-
-        # Main page
-        self.main_page = QWidget()
-        main_page_layout = QVBoxLayout(self.main_page)
-        # ... add widgets to main_page_layout ...
-        self.stacked_widget.addWidget(self.main_page)
-
-        # Whitelist page
-        self.whitelist_page = QWidget()
-        whitelist_page_layout = QVBoxLayout(self.whitelist_page)
-        # ... add widgets to whitelist_page_layout ...
-        self.stacked_widget.addWidget(self.whitelist_page)
-
-        # Settings page
-        self.settings_page = QWidget()
-        settings_page_layout = QVBoxLayout(self.settings_page)
-        # ... add widgets to settings_page_layout ...
-        self.stacked_widget.addWidget(self.settings_page)
+        self.stacked_widget.setCurrentIndex(0)
 
     def change_player(self):
         id = self.whitelist_entry.text().strip()
@@ -228,8 +177,8 @@ class ServerCopilot(QMainWindow):
             id = self.whitelist_entry.text().strip()
             player = self.whitelist.name(id)
         if player:
-            self.whitelist.update_whitelist(r".\data\all_players.json", add=[player])
-            self.whitelist.update_whitelist(r".\data\guest.json", add=[player])
+            self.whitelist.update_whitelist(os.path.join(self.data_folder, "all_players.json"), add=[player])
+            self.whitelist.update_whitelist(os.path.join(self.data_folder, "guest.json"), add=[player])
             self.whitelist.update_whitelist_buttons()
         self.whitelist_entry.clear()
 
@@ -243,16 +192,16 @@ class ServerCopilot(QMainWindow):
         self.whitelist_entry.clear()
 
     def open_whitelist_menu(self):
-        self.whitelist_button.setIcon(QIcon(r"icon\back_icon_dark.png"))
+        self.whitelist_button.setIcon(QIcon(os.path.join(self.icon_folder, "back_icon_dark.png")))
         self.whitelist_button.clicked.disconnect()
         self.whitelist_button.clicked.connect(self.close_whitelist_menu)
-        widget_swap(self, self.stacked_widget, 1, direction="right")
+        # widget_swap(self, self.stacked_widget, 1, direction="right")
 
     def close_whitelist_menu(self):
-        self.whitelist_button.setIcon(QIcon(r"icon\whitelist_on_icon_dark.png"))
+        self.whitelist_button.setIcon(QIcon(os.path.join(self.icon_folder, "whitelist_on_icon_dark.png")))
         self.whitelist_button.clicked.disconnect()
         self.whitelist_button.clicked.connect(self.open_whitelist_menu)
-        widget_swap(self, self.stacked_widget, 0, direction="left")
+        # widget_swap(self, self.stacked_widget, 0, direction="left")
 
     def update_terminal(self):
         if any(line.strip() for line in self.new_content):
@@ -272,38 +221,41 @@ class ServerCopilot(QMainWindow):
             "view_mode": "black",
             "whitelist": self.whitelist_type
         }
-        with open(r".\data\saved.json", "w") as file:
+        with open(os.path.join(self.data_folder, "saved.json"), "w") as file:
             json.dump(settings, file, indent=4)
 
     def unfold(self):
+        screen_height = QGuiApplication.primaryScreen().geometry().height()
         self.setFixedSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX)
-        self.resize(self.width, 4*self.height)
+        self.resize(self.width, self.height)
         self.setFixedSize(self.size())
-        self.fold_button.setIcon(QIcon(r"icon\fold_in_icon_dark.png"))
+        self.fold_button.setIcon(QIcon(os.path.join(self.icon_folder, "fold_in_icon_dark.png")))
         try:
             self.fold_button.clicked.disconnect()
         except TypeError:
             pass
         self.fold_button.clicked.connect(self.fold_in)
         self.folded_in = False
+        self.main_button.show()
         self.whitelist_button.show()
         self.settings_button.show()
-        self.server_terminal.show()
 
     def fold_in(self):
         self.setFixedSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX)
-        self.resize(self.width, self.height)
+        fold_height = self.fold_button.height() + 16  # 16 for padding/margin
+        self.resize(self.width, fold_height)
         self.setFixedSize(self.size())
-        self.fold_button.setIcon(QIcon(r"icon\unfold_icon_dark.png"))
+        self.fold_button.setIcon(QIcon(os.path.join(self.icon_folder, "unfold_icon_dark.png")))
         try:
             self.fold_button.clicked.disconnect()
         except TypeError:
             pass
         self.fold_button.clicked.connect(self.unfold)
         self.folded_in = True
+        self.main_button.hide()
         self.whitelist_button.hide()
         self.settings_button.hide()
-        self.server_terminal.hide()
+        # Optionally hide other widgets if needed
 
     def start_server(self):
         self.new_content.append("[ServerCopilot]: Starting your Server\n")
@@ -332,7 +284,7 @@ class ServerCopilot(QMainWindow):
                 change_shortcut(self.shortcut_name, "main_dark.ico", "Start " + self.server.name)
             else:
                 change_shortcut(self.shortcut_name, "server_dorment.ico", "Start " + self.server.name)
-            self.setWindowIcon(QIcon(r"icon\main_dark.ico") if not self.server.has_icon else QIcon(r"icon\server_dorment.ico"))
+            self.setWindowIcon(QIcon(os.path.join(self.icon_folder, "main_dark.ico")) if not self.server.has_icon else QIcon(os.path.join(self.icon_folder, "server_dorment.ico")))
             self.stop_button.setText("Start")
             self.stop_button.clicked.disconnect()
             self.stop_button.clicked.connect(self.start_server)
@@ -357,9 +309,9 @@ class ServerCopilot(QMainWindow):
     def minimize_to_tray(self):
         self.hide()
         if self.server.has_icon:
-            icon = QIcon(r"icon\server.ico") if self.server.running else QIcon(r"icon\server_dorment.ico")
+            icon = QIcon(os.path.join(self.icon_folder, "server.ico")) if self.server.running else QIcon(os.path.join(self.icon_folder, "server_dorment.ico"))
         else:
-            icon = QIcon(r"icon\main_running.ico") if self.server.running else QIcon(r"icon\main_dark.ico")
+            icon = QIcon(os.path.join(self.icon_folder, "main_running.ico")) if self.server.running else QIcon(os.path.join(self.icon_folder, "main_dark.ico"))
         self.tray_icon = QSystemTrayIcon(icon, self)
         self.tray_icon.setToolTip(self.server.name)
         menu = QMenu()
@@ -383,20 +335,20 @@ class ServerCopilot(QMainWindow):
         menu.addAction(widget_action)
         menu.addSeparator()
 
-        maximize_icon = QIcon(r"icon\maximize_icon_dark.png")
+        maximize_icon = QIcon(os.path.join(self.icon_folder, "maximize_icon_dark.png"))
         maximize_action = QAction(maximize_icon, "Maximize", self)
         maximize_action.triggered.connect(self.maximize_from_tray)
         menu.addAction(maximize_action)
         if self.whitelist_type == "default":
-            whitelist_icon = QIcon(r"icon\whitelist_off_icon_dark.png")
+            whitelist_icon = QIcon(os.path.join(self.icon_folder, "whitelist_off_icon_dark.png"))
         else:
-            whitelist_icon = QIcon(r"icon\whitelist_on_icon_dark.png")
+            whitelist_icon = QIcon(os.path.join(self.icon_folder, "whitelist_on_icon_dark.png"))
         whitelist_action = QAction(whitelist_icon, "Whitelist", self)
         whitelist_action.triggered.connect(self.whitelist.toggle_whitelist)
         menu.addAction(whitelist_action)
         menu.addSeparator()
 
-        quit_icon = QIcon(r"icon\quit_icon_dark.png")
+        quit_icon = QIcon(os.path.join(self.icon_folder, "quit_icon_dark.png"))
         quit_action = QAction(quit_icon, "Quit", self)
         quit_action.triggered.connect(self.quit_window)
         menu.addAction(quit_action)
@@ -417,14 +369,14 @@ class ServerCopilot(QMainWindow):
         self.raise_()
         self.activateWindow()
         if self.server.running:
-            self.setWindowIcon(QIcon(r"icon\main_running.ico") if not self.server.has_icon else QIcon(r"icon\server.ico"))
+            self.setWindowIcon(QIcon(os.path.join(self.icon_folder, "main_running.ico")) if not self.server.has_icon else QIcon(os.path.join(self.icon_folder, "server.ico")))
             self.stop_button.setText("Stop")
             self.stop_button.clicked.disconnect()
             self.stop_button.clicked.connect(self.stop_server)
             self.restart_button.setEnabled(True)
             QTimer.singleShot(500, self.update_terminal)
         else:
-            self.setWindowIcon(QIcon(r"icon\main_dark.ico") if not self.server.has_icon else QIcon(r"icon\server_dorment.ico"))
+            self.setWindowIcon(QIcon(os.path.join(self.icon_folder, "main_dark.ico")) if not self.server.has_icon else QIcon(os.path.join(self.icon_folder, "server_dorment.ico")))
             self.stop_button.setText("Start")
             self.stop_button.clicked.disconnect()
             self.stop_button.clicked.connect(self.start_server)
