@@ -1,7 +1,8 @@
-from widgets import confirm_dialogue
-from collections import namedtuple
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QCheckBox, QFrame, QMessageBox, QScrollArea
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QCheckBox, QFrame, QMessageBox, QScrollArea, QSizePolicy)
 from mojang import API
+from .confirm_dialogue import confirm_dialogue
+from collections import namedtuple
 import json
 import os
 
@@ -29,11 +30,13 @@ class Whitelist(QWidget):
 
         self.whitelist_default_button = QPushButton("Default")
         self.whitelist_default_button.setFixedHeight(self.main_button_height)
+        self.whitelist_default_button.setStyleSheet(f"font-size: 16px; padding: 8px 18px; font-family: '{self.app.custom_font_family}', Arial, sans-serif;")
         self.whitelist_default_button.clicked.connect(self.toggle_whitelist)
         button_row.addWidget(self.whitelist_default_button)
 
         self.whitelist_guest_button = QPushButton("Guest")
         self.whitelist_guest_button.setFixedHeight(self.main_button_height)
+        self.whitelist_guest_button.setStyleSheet(f"font-size: 16px; padding: 8px 18px; font-family: '{self.app.custom_font_family}', Arial, sans-serif;")
         self.whitelist_guest_button.clicked.connect(self.toggle_whitelist)
         button_row.addWidget(self.whitelist_guest_button)
 
@@ -42,14 +45,20 @@ class Whitelist(QWidget):
         # Scroll areas for player lists
         self.whitelist_default_list = QScrollArea()
         self.whitelist_default_list.setWidgetResizable(True)
+        self.whitelist_default_list.setFixedHeight(self.height - self.main_button_height)
         self.default_list_widget = QWidget()
         self.default_list_layout = QVBoxLayout(self.default_list_widget)
+        self.default_list_layout.setSpacing(0)
+        self.default_list_layout.setContentsMargins(0, 0, 0, 0)
         self.whitelist_default_list.setWidget(self.default_list_widget)
 
         self.whitelist_guest_list = QScrollArea()
         self.whitelist_guest_list.setWidgetResizable(True)
+        self.whitelist_guest_list.setFixedHeight(self.height - self.main_button_height)
         self.guest_list_widget = QWidget()
         self.guest_list_layout = QVBoxLayout(self.guest_list_widget)
+        self.guest_list_layout.setSpacing(0)
+        self.guest_list_layout.setContentsMargins(0, 0, 0, 0)
         self.whitelist_guest_list.setWidget(self.guest_list_widget)
 
         lists_row = QHBoxLayout()
@@ -61,56 +70,80 @@ class Whitelist(QWidget):
 
     def update_whitelist_buttons(self):
         # Clear previous
-        for i in reversed(range(self.default_list_layout.count())):
-            widget = self.default_list_layout.itemAt(i).widget()
+        while self.default_list_layout.count():
+            item = self.default_list_layout.takeAt(0)
+            widget = item.widget()
             if widget:
                 widget.deleteLater()
-        for i in reversed(range(self.guest_list_layout.count())):
-            widget = self.guest_list_layout.itemAt(i).widget()
+        while self.guest_list_layout.count():
+            item = self.guest_list_layout.takeAt(0)
+            widget = item.widget()
             if widget:
                 widget.deleteLater()
         self.button_elements.clear()
 
+        def fill_with_entries(layout, entries, make_widget):
+            if not entries:
+                layout.addStretch(1)
+                return
+            for entry in entries:
+                w = make_widget(entry)
+                w.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+                layout.addWidget(w)
+            layout.addStretch(1)
+
         if self.whitelist:
-            for player in self.whitelist.keys():
+            players = list(self.whitelist.keys())
+
+            def make_default_widget(player):
                 def button_click_action(p=player):
                     self.highlight_buttons(p)
-                    # Only set text if the entry exists (on whitelist page)
                     if hasattr(self.app, "whitelist_entry"):
                         self.app.whitelist_entry.setText(p)
-
-                # Default list
                 default_frame = QFrame()
                 default_layout = QHBoxLayout(default_frame)
+                default_layout.setContentsMargins(0, 0, 0, 0)
                 switch_default = QCheckBox()
                 switch_default.setChecked(player in self.default_whitelist)
                 switch_default.stateChanged.connect(lambda state, p=player, t="default": self.toggle_player(p, t))
-                default_layout.addWidget(switch_default)
                 button_default = QPushButton(player)
                 button_default.clicked.connect(button_click_action)
+                button_default.setStyleSheet("font-size: 14px; padding: 8px 18px; text-align: left;")
+                default_layout.addWidget(switch_default)
                 default_layout.addWidget(button_default)
-                self.default_list_layout.addWidget(default_frame)
+                default_layout.addStretch(1)
+                self.button_elements.append(button_element(default_frame, switch_default, button_default, "default"))
+                return default_frame
 
-                # Guest list
+            def make_guest_widget(player):
+                def button_click_action(p=player):
+                    self.highlight_buttons(p)
+                    if hasattr(self.app, "whitelist_entry"):
+                        self.app.whitelist_entry.setText(p)
                 guest_frame = QFrame()
                 guest_layout = QHBoxLayout(guest_frame)
+                guest_layout.setContentsMargins(0, 0, 0, 0)
                 switch_guest = QCheckBox()
                 switch_guest.setChecked(player in self.guest_whitelist)
                 switch_guest.stateChanged.connect(lambda state, p=player, t="guest": self.toggle_player(p, t))
-                guest_layout.addWidget(switch_guest)
                 button_guest = QPushButton(player)
                 button_guest.clicked.connect(button_click_action)
+                button_guest.setStyleSheet("font-size: 14px; padding: 8px 18px; text-align: left;")
+                guest_layout.addWidget(switch_guest)
                 guest_layout.addWidget(button_guest)
-                self.guest_list_layout.addWidget(guest_frame)
+                guest_layout.addStretch(1)
+                self.button_elements.append(button_element(guest_frame, switch_guest, button_guest, "guest"))
+                return guest_frame
 
-                self.button_elements.extend([
-                    button_element(default_frame, switch_default, button_default, "default"),
-                    button_element(guest_frame, switch_guest, button_guest, "guest")
-                ])
+            fill_with_entries(self.default_list_layout, players, make_default_widget)
+            fill_with_entries(self.guest_list_layout, players, make_guest_widget)
         else:
-            # No players
+            self.default_list_layout.addStretch(1)
             self.default_list_layout.addWidget(QLabel("No players"))
+            self.default_list_layout.addStretch(1)
+            self.guest_list_layout.addStretch(1)
             self.guest_list_layout.addWidget(QLabel("No players"))
+            self.guest_list_layout.addStretch(1)
 
     def highlight_buttons(self, player_name: str):
         for element in self.button_elements:

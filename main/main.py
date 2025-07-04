@@ -1,8 +1,7 @@
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QMessageBox,
     QTextEdit, QLabel, QMenu, QLineEdit, QFrame, QWidgetAction, QSystemTrayIcon,
-    QStackedWidget, QWIDGETSIZE_MAX
-)
+    QStackedWidget, QWIDGETSIZE_MAX)
 from PyQt6.QtGui import QIcon, QAction, QTextCursor, QGuiApplication, QFontDatabase
 from widgets.sidebar_button import SidebarButtonWithMarker, SidebarButton
 from tools.terminal_output_worker import TerminalOutputWorker
@@ -10,7 +9,7 @@ from PyQt6.QtCore import Qt, QTimer, QSize, QEvent, QThread
 from widgets.confirm_dialogue import confirm_dialogue
 from tools.instance_checker import SingleInstance
 from startup import startup, change_shortcut
-from whitelist import Whitelist
+from widgets.whitelist import Whitelist
 from server import Server
 import json
 import sys
@@ -234,12 +233,28 @@ class ServerCopilot(QMainWindow):
         whitelist_page_layout = QVBoxLayout(whitelist_page)
         whitelist_page_layout.setContentsMargins(5, 5, 5, 5)
         whitelist_page_layout.setSpacing(5)
-        self.whitelist = Whitelist(self)
+        self.whitelist = Whitelist(self, height=self.height - self.button_height - 25)
         whitelist_page_layout.addWidget(self.whitelist, alignment=Qt.AlignmentFlag.AlignTop)
         self.whitelist.update_whitelist_buttons()
+        # Entry field with + and - buttons
+        entry_row = QWidget()
+        entry_row_layout = QHBoxLayout(entry_row)
+        entry_row_layout.setContentsMargins(0, 0, 0, 0)
+        entry_row_layout.setSpacing(5)
         self.whitelist_entry = QLineEdit()
         self.whitelist_entry.setPlaceholderText("Enter player name or UUID")
-        whitelist_page_layout.addWidget(self.whitelist_entry, alignment=Qt.AlignmentFlag.AlignTop)
+        entry_row_layout.addWidget(self.whitelist_entry)
+        add_btn = QPushButton("+")
+        add_btn.setFixedWidth(32)
+        add_btn.setStyleSheet("QPushButton { background-color: #2e7d32; color: white; font-size: 18px; border-radius: 8px; } QPushButton:hover { background-color: #388e3c; }")
+        add_btn.clicked.connect(self.add_player)
+        entry_row_layout.addWidget(add_btn)
+        remove_btn = QPushButton("-")
+        remove_btn.setFixedWidth(32)
+        remove_btn.setStyleSheet("QPushButton { background-color: #c62828; color: white; font-size: 18px; border-radius: 8px; } QPushButton:hover { background-color: #b71c1c; }")
+        remove_btn.clicked.connect(self.remove_player)
+        entry_row_layout.addWidget(remove_btn)
+        whitelist_page_layout.addWidget(entry_row, alignment=Qt.AlignmentFlag.AlignTop)
 
         # Settings page
         settings_page = QLabel("Settings Page")
