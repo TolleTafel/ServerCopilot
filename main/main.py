@@ -19,14 +19,6 @@ class ServerCopilot(QMainWindow):
     def __init__(self, window_width: int = 25, window_height: int = 25):
         print("Creating ServerCopilot instance ...")
         super().__init__()
-        self.message = None
-        self.instance_locker = SingleInstance(self, "ServerCopilotMutex")
-        if not self.instance_locker.is_running():
-            self.instance_locker.start_message_listener(self.check_for_instance_messages)
-        else:
-            print("Already running! Sending data ...")
-            self.instance_locker.send_message_to_instance("new instance started")
-            raise SystemExit
         self.data = startup(self)
         self.shortcut_name = self.data["desktop_shortcut"]
         self.server = Server(self.data["filepath"])
@@ -61,10 +53,20 @@ class ServerCopilot(QMainWindow):
         else:
             print("Failed to load Not-Bower-Bold.ttf font file")
 
+        self.lock_instance()
         self.init_ui()
         self.fold_in()
         print("ServerCopilot instance created successfully")
 
+    def lock_instance(self):
+        self.instance_locker = SingleInstance(self, "ServerCopilotMutex" + self.server.name.replace(" ", "_"))
+        if not self.instance_locker.is_running():
+            self.instance_locker.start_message_listener(self.check_for_instance_messages)
+        else:
+            print("Already running! Sending data ...")
+            self.instance_locker.send_message_to_instance("new instance started")
+            raise SystemExit
+    
     def init_ui(self):
         print("Initialising UI ...")
         self.button_height = round(1.2 * self.height // 12)
