@@ -1,23 +1,24 @@
-from widgets.confirm_dialogue import confirm_dialogue
-from widgets.sidebar_button import SidebarButtonWithMarker, SidebarButton
-from startup import startup, change_shortcut
-from instance_checker import SingleInstance
-from whitelist import Whitelist
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QMessageBox,
-    QTextEdit, QLabel, QMenu, QGridLayout, QLineEdit, QFrame, QWidgetAction, QSystemTrayIcon,
+    QTextEdit, QLabel, QMenu, QLineEdit, QFrame, QWidgetAction, QSystemTrayIcon,
     QStackedWidget, QWIDGETSIZE_MAX
 )
-from PyQt6.QtGui import QIcon, QPixmap, QAction, QTextCursor, QGuiApplication, QFontDatabase
-from PyQt6.QtCore import Qt, QTimer, QSize
+from PyQt6.QtGui import QIcon, QAction, QTextCursor, QGuiApplication, QFontDatabase
+from widgets.sidebar_button import SidebarButtonWithMarker, SidebarButton
+from tools.terminal_output_worker import TerminalOutputWorker
+from PyQt6.QtCore import Qt, QTimer, QSize, QEvent, QThread
+from widgets.confirm_dialogue import confirm_dialogue
+from tools.instance_checker import SingleInstance
+from startup import startup, change_shortcut
+from whitelist import Whitelist
 from server import Server
-import threading
 import json
 import sys
 import os
 
 class ServerCopilot(QMainWindow):
     def __init__(self, window_width: int = 25, window_height: int = 25):
+        print("Creating ServerCopilot instance ...")
         super().__init__()
         self.message = None
         self.instance_locker = SingleInstance(self, "ServerCopilotMutex")
@@ -49,6 +50,9 @@ class ServerCopilot(QMainWindow):
         self.fold_after_exit = False
         self.terminate_thread = False
         self.terminal_thread = None
+        self.terminal_worker = None
+        self.terminal_worker_thread = None
+        self.quit_after_startup = False
         self.custom_font_family = "Arial"
         font_id = QFontDatabase.addApplicationFont(os.path.join(self.font_folder, "Not-Bower-Bold.ttf"))
         if font_id != -1:
@@ -60,9 +64,10 @@ class ServerCopilot(QMainWindow):
 
         self.init_ui()
         self.fold_in()
-        self.show()
+        print("ServerCopilot instance created successfully")
 
     def init_ui(self):
+        print("Initialising UI ...")
         self.button_height = round(1.2 * self.height // 12)
         self.button_width = round((self.width - self.button_height) // 2 - 26)
 
@@ -91,7 +96,7 @@ class ServerCopilot(QMainWindow):
         sidebar_widget.setStyleSheet("background-color: #1c1c1c;")
         sidebar_layout = QVBoxLayout(sidebar_widget)
         sidebar_layout.setSpacing(10)
-        sidebar_layout.setContentsMargins(0, 0, 0, 0)
+        sidebar_layout.setContentsMargins(0, 4, 0, 0)
         sidebar_widget.setFixedWidth(self.button_height + 16)
 
         def set_selected_tab(selected_btn):
@@ -162,6 +167,7 @@ class ServerCopilot(QMainWindow):
             set_selected_tab(self.settings_button),
             self.stacked_widget.setCurrentIndex(3)
         ])
+        self.settings_button.setDisabled(True)  # Disable settings button for now TODO: Implement settings page
         sidebar_layout.addWidget(self.settings_button)
         main_layout.addWidget(sidebar_widget)
 
@@ -204,7 +210,8 @@ class ServerCopilot(QMainWindow):
         self.server_terminal.setStyleSheet(f"""QTextEdit {{
                 background-color: #262626;
                 font-family: "{self.custom_font_family}", Arial, sans-serif; 
-            }}""") # TODO
+            }}""")
+        main_page_layout.addWidget(self.server_terminal, alignment=Qt.AlignmentFlag.AlignTop)
         main_page_layout.addStretch()
         # Buttons
         button_layout = QHBoxLayout()
@@ -223,7 +230,16 @@ class ServerCopilot(QMainWindow):
         main_page_layout.addLayout(button_layout)
 
         # Whitelist page
-        whitelist_page = QLabel("Whitelist Page")
+        whitelist_page = QWidget()
+        whitelist_page_layout = QVBoxLayout(whitelist_page)
+        whitelist_page_layout.setContentsMargins(5, 5, 5, 5)
+        whitelist_page_layout.setSpacing(5)
+        self.whitelist = Whitelist(self)
+        whitelist_page_layout.addWidget(self.whitelist, alignment=Qt.AlignmentFlag.AlignTop)
+        self.whitelist.update_whitelist_buttons()
+        self.whitelist_entry = QLineEdit()
+        self.whitelist_entry.setPlaceholderText("Enter player name or UUID")
+        whitelist_page_layout.addWidget(self.whitelist_entry, alignment=Qt.AlignmentFlag.AlignTop)
 
         # Settings page
         settings_page = QLabel("Settings Page")
@@ -236,6 +252,8 @@ class ServerCopilot(QMainWindow):
         # Set main tab as selected by default
         set_selected_tab(self.main_button)
         self.stacked_widget.setCurrentIndex(1)
+
+        print("UI initialised successfully")
 
     def change_player(self):
         id = self.whitelist_entry.text().strip()
@@ -264,28 +282,22 @@ class ServerCopilot(QMainWindow):
             self.whitelist.update_whitelist_buttons()
         self.whitelist_entry.clear()
 
-    def open_whitelist_menu(self):
-        self.whitelist_button.setIcon(QIcon(os.path.join(self.icon_folder, "back_icon_dark.png")))
-        self.whitelist_button.clicked.disconnect()
-        self.whitelist_button.clicked.connect(self.close_whitelist_menu)
-        # widget_swap(self, self.stacked_widget, 1, direction="right")
+    def closeEvent(self, event):
+        self.quit_window()
+        event.ignore()
 
-    def close_whitelist_menu(self):
-        self.whitelist_button.setIcon(QIcon(os.path.join(self.icon_folder, "whitelist_on_icon_dark.png")))
-        self.whitelist_button.clicked.disconnect()
-        self.whitelist_button.clicked.connect(self.open_whitelist_menu)
-        # widget_swap(self, self.stacked_widget, 0, direction="left")
+    def changeEvent(self, event):
+        if event.type() == QEvent.Type.WindowStateChange:
+            if self.isMinimized():
+                self.minimize_to_tray()
+        super().changeEvent(event)
 
-    def update_terminal(self):
-        if any(line.strip() for line in self.new_content):
-            for line in self.new_content:
-                if "[Server thread/INFO]: Done" in line:
-                    self.server.change_startup_state()
-            self.terminal_content.extend(self.new_content)
-            self.new_content.clear()
-            self.server_terminal.setPlainText("".join(self.terminal_content))
-            self.server_terminal.moveCursor(QTextCursor.MoveOperation.End)
-        QTimer.singleShot(1000, self.update_terminal)
+    def update_terminal(self, line):
+        if "[Server thread/INFO]: Done" in line:
+            self.server.change_startup_state()
+        self.terminal_content.append(line)
+        self.server_terminal.setPlainText("".join(self.terminal_content))
+        self.server_terminal.moveCursor(QTextCursor.MoveOperation.End)
 
     def save_settings(self):
         settings = {
@@ -332,29 +344,53 @@ class ServerCopilot(QMainWindow):
         self.settings_button.hide()
 
     def start_server(self):
-        self.new_content.append("[ServerCopilot]: Starting your Server\n")
+        print("Starting server")
+        self.update_terminal("[ServerCopilot]: Starting your Server\n")
         if not self.server.has_icon:
             change_shortcut(self.shortcut_name, "main_running.ico", "Stop " + self.server.name)
         else:
             change_shortcut(self.shortcut_name, "server.ico", "Stop " + self.server.name)
+        print("└─ Sending Start signal")
         self.server.start_server(3000)
         self.terminate_thread = False
-        self.terminal_thread = threading.Thread(target=lambda: get_terminal_output(self), daemon=True)
-        self.terminal_thread.start()
+        if self.terminal_worker_thread:
+            print("└─ Terminating previous terminal worker thread")
+            self.terminate_thread = True
+            self.terminal_worker_thread.quit()
+            self.terminal_worker_thread.wait()
+            self.terminal_worker_thread = None
+            self.terminal_worker = None
+        print("└─ Creating new terminal worker thread")
+        self.terminate_thread = False
+        self.terminal_worker = TerminalOutputWorker(self.server, lambda: self.terminate_thread)
+        self.terminal_worker_thread = QThread()
+        self.terminal_worker.moveToThread(self.terminal_worker_thread)
+        self.terminal_worker.new_line.connect(self.update_terminal)
+        self.terminal_worker.finished.connect(self.terminal_worker_thread.quit)
+        self.terminal_worker_thread.started.connect(self.terminal_worker.run)
+        self.terminal_worker_thread.start()
         self.stop_button.setText("Stop")
         self.stop_button_folded.setText("Stop")
         self.stop_button.clicked.disconnect()
         self.stop_button.clicked.connect(self.stop_server)
         self.restart_button.setEnabled(True)
         self.restart_button_folded.setEnabled(True)
-        QTimer.singleShot(500, self.update_terminal)
+        print("└─ Server started successfully")
 
     def stop_server(self):
+        print("Stopping server...")
         if not self.server.in_startup:
-            self.new_content.append("[ServerCopilot]: Stopped your Server\n")
+            self.update_terminal("[ServerCopilot]: Stopped your Server\n")
+            print("└─ Terminating terminal worker thread")
             self.terminate_thread = True
-            if self.terminal_thread:
-                self.terminal_thread.join(1)
+            if self.terminal_worker_thread:
+                self.terminal_worker_thread.quit()
+                if not self.terminal_worker_thread.wait(500):
+                    print("Warning: terminal_worker_thread did not finish in time, terminating forcefully.")
+                    self.terminal_worker_thread.terminate()
+                    self.terminal_worker_thread.wait(1000)
+                self.terminal_worker = None
+            print("└─ Sending Stop signal")
             self.server.write_to_server("stop")
             if not self.server.has_icon:
                 change_shortcut(self.shortcut_name, "main_dark.ico", "Start " + self.server.name)
@@ -367,22 +403,39 @@ class ServerCopilot(QMainWindow):
             self.stop_button.clicked.connect(self.start_server)
             self.restart_button.setEnabled(False)
             self.restart_button_folded.setEnabled(False)
+            print("└─ Server stopped successfully")
         else:
             QTimer.singleShot(500, self.stop_server)
 
     def restart_server(self):
+        print("Restarting server...")
         if self.server.in_startup:
             QTimer.singleShot(500, self.restart_server)
         elif self.server.running:
-            self.new_content.append("[ServerCopilot]: Restarting your Server\n")
+            self.terminal_content.append("[ServerCopilot]: Restarting your Server\n")
+            print("└─ Terminating terminal worker thread")
             self.terminate_thread = True
-            if self.terminal_thread:
-                self.terminal_thread.join(1)
+            if self.terminal_worker_thread:
+                self.terminal_worker_thread.quit()
+                if not self.terminal_worker_thread.wait(500):
+                    print("Warning: terminal_worker_thread did not finish in time, terminating forcefully.")
+                    self.terminal_worker_thread.terminate()
+                    self.terminal_worker_thread.wait(1000)
+                self.terminal_worker = None
+            print("└─ Sending Stop signal")
             self.server.write_to_server("stop")
+            print("└─ Server stopped, Sending Start signal")
             self.server.start_server(3000)
+            print("└─ Creating new terminal worker thread")
             self.terminate_thread = False
-            self.terminal_thread = threading.Thread(target=lambda: get_terminal_output(self), daemon=True)
-            self.terminal_thread.start()
+            self.terminal_worker = TerminalOutputWorker(self.server, lambda: self.terminate_thread)
+            self.terminal_worker_thread = QThread()
+            self.terminal_worker.moveToThread(self.terminal_worker_thread)
+            self.terminal_worker.new_line.connect(self.update_terminal)
+            self.terminal_worker.finished.connect(self.terminal_worker_thread.quit)
+            self.terminal_worker_thread.started.connect(self.terminal_worker.run)
+            self.terminal_worker_thread.start()
+            print("└─ Server restarted successfully")
 
     def minimize_to_tray(self):
         self.hide()
@@ -452,7 +505,6 @@ class ServerCopilot(QMainWindow):
             self.stop_button.clicked.disconnect()
             self.stop_button.clicked.connect(self.stop_server)
             self.restart_button.setEnabled(True)
-            QTimer.singleShot(500, self.update_terminal)
         else:
             self.setWindowIcon(QIcon(os.path.join(self.icon_folder, "main_dark.ico")) if not self.server.has_icon else QIcon(os.path.join(self.icon_folder, "server_dorment.ico")))
             self.stop_button.setText("Start")
@@ -472,33 +524,43 @@ class ServerCopilot(QMainWindow):
                 self.start_server()
 
     def quit_window(self):
-        if self.server.running:
-            if not confirm_dialogue(self.server, "Quit ServerCopilot?", "Your server is currently running. Are you sure you want to quit?", QMessageBox.Icon.Warning):
+        print("Quitting ServerCopilot...")
+        if self.server.in_startup:
+            if not confirm_dialogue(self.server, "Quit ServerCopilot?", "Your server is currently starting up. Do you want to quit as soon as the server has started?", QMessageBox.Icon.Warning):
+                print("└─ User cancelled quit operation")
                 return
-            self.terminate_thread = True
-            if self.terminal_thread:
-                self.terminal_thread.join(1)
-            self.server.write_to_server("stop")
+            print("└─ Will quit as soon as the server has started.")
+            def check_and_quit():
+                print("└─ Checking if server has started...")
+                if not self.server.in_startup:
+                    print("└─ Server has started, quitting now.")
+                    self.quit_after_startup = True
+                    self.quit_window()
+                    return
+                else:
+                    QTimer.singleShot(500, check_and_quit)
+            QTimer.singleShot(500, check_and_quit)
+            return
+        elif self.server.running and not self.quit_after_startup:
+            if not confirm_dialogue(self.server, "Quit ServerCopilot?", "Your server is currently running. Are you sure you want to quit?", QMessageBox.Icon.Warning):
+                print("└─ User cancelled quit operation")
+                return
+            self.stop_server()
             change_shortcut(self.shortcut_name, "server_dorment.ico", "Start " + self.server.name)
         if self.tray_icon:
+            print("└─ Quitting tray process")
             self.tray_icon.hide()
             self.tray_icon = None
         self.save_settings()
         self.instance_locker.release()
+        print("└─ Quit process successful. Until next time, then.")
         QApplication.quit()
         raise SystemExit
-
-def get_terminal_output(app):
-    if app.server.server:
-        with app.server.server as terminal:
-            for line in terminal.stdout:
-                if app.terminate_thread:
-                    break
-                if line:
-                    app.new_content.append(line)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     copilot = ServerCopilot()
     copilot.start_server()
+    copilot.minimize_to_tray()
+    print("ServerCopilot started successfully")
     sys.exit(app.exec())

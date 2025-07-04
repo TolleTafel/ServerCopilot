@@ -1,8 +1,6 @@
 from widgets import confirm_dialogue
 from collections import namedtuple
-from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QCheckBox, QFrame, QMessageBox, QScrollArea
-)
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QCheckBox, QFrame, QMessageBox, QScrollArea
 from mojang import API
 import json
 import os
