@@ -2,10 +2,10 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QMessageBox,
     QTextEdit, QLabel, QMenu, QLineEdit, QFrame, QWidgetAction, QSystemTrayIcon,
     QStackedWidget, QWIDGETSIZE_MAX)
-from PyQt6.QtGui import QIcon, QAction, QTextCursor, QGuiApplication, QFontDatabase
+from PyQt6.QtGui import QIcon, QAction, QTextCursor, QGuiApplication, QFontDatabase, QDesktopServices
 from widgets.sidebar_button import SidebarButtonWithMarker, SidebarButton
 from tools.terminal_output_worker import TerminalOutputWorker
-from PyQt6.QtCore import Qt, QTimer, QSize, QEvent, QThread
+from PyQt6.QtCore import Qt, QTimer, QSize, QEvent, QThread, QUrl
 from widgets.confirm_dialogue import confirm_dialogue
 from tools.instance_checker import SingleInstance
 from startup import startup, change_shortcut
@@ -44,15 +44,18 @@ class ServerCopilot(QMainWindow):
         self.terminal_worker = None
         self.terminal_worker_thread = None
         self.quit_after_startup = False
-        self.custom_font_family = "Arial"
+        
+        # Font system: BowerBold for titles (buttons, headings), Times New Roman for body text (inputs, terminal, menus)
+        self.title_font_family = "Arial"  # Fallback for titles
+        self.body_font_family = "Times New Roman"  # Body text font
+        
         font_id = QFontDatabase.addApplicationFont(os.path.join(self.font_folder, "Not-Bower-Bold.ttf"))
         if font_id != -1:
             font_families = QFontDatabase.applicationFontFamilies(font_id)
             if font_families:
-                self.custom_font_family = font_families[0]
+                self.title_font_family = font_families[0]
         else:
             print("Failed to load Not-Bower-Bold.ttf font file")
-
         self.lock_instance()
         self.init_ui()
         self.fold_in()
@@ -78,7 +81,7 @@ class ServerCopilot(QMainWindow):
                 border: none;
                 border-radius: 12px;
                 font-size: 18px;
-                font-family: "{self.custom_font_family}", Arial, sans-serif;
+                font-family: "{self.title_font_family}", Arial, sans-serif;
             }}
             QPushButton:hover {{
                 background-color: #3c3c3c;
@@ -132,7 +135,7 @@ class ServerCopilot(QMainWindow):
         fold_layout.addWidget(self.fold_button)
         sidebar_layout.addWidget(fold_container)
 
-        # Main tab button (server icon)
+        # Main tab button
         self.main_button = SidebarButtonWithMarker(SidebarButton())
         self.main_button.button.setIcon(QIcon(os.path.join(self.icon_folder, "terminal_icon_dark.png")))
         self.main_button.setFixedSize(self.button_height, self.button_height)
@@ -159,6 +162,14 @@ class ServerCopilot(QMainWindow):
 
         sidebar_layout.addStretch()  # Pushes the settings button to the bottom
 
+        # Help button
+        self.help_button = SidebarButtonWithMarker(SidebarButton())
+        self.help_button.button.setIcon(QIcon(os.path.join(self.icon_folder, "help_icon_dark.png")))
+        self.help_button.setFixedSize(self.button_height, self.button_height)
+        self.help_button.button.setIconSize(QSize(icon_size-3, icon_size-3))
+        self.help_button.button.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://github.com/TolleTafel/ServerCopilot")))
+        sidebar_layout.addWidget(self.help_button)
+
         # Settings tab button
         self.settings_button = SidebarButtonWithMarker(SidebarButton())
         self.settings_button.button.setIcon(QIcon(os.path.join(self.icon_folder, "settings_icon_dark.png")))
@@ -170,6 +181,7 @@ class ServerCopilot(QMainWindow):
         ])
         self.settings_button.setDisabled(True)  # Disable settings button for now TODO: Implement settings page
         sidebar_layout.addWidget(self.settings_button)
+
         main_layout.addWidget(sidebar_widget)
 
         # Seperator
@@ -189,11 +201,13 @@ class ServerCopilot(QMainWindow):
         main_page_folded_layout.setSpacing(5)
         self.stop_button_folded = QPushButton("Stop")
         self.stop_button_folded.setFixedSize(self.button_width, self.button_height)
+        self.stop_button_folded.setCursor(Qt.CursorShape.PointingHandCursor)
         self.stop_button_folded.clicked.connect(self.stop_server)
         self.stop_button_folded.setStyleSheet(button_stylesheet)
         main_page_folded_layout.addWidget(self.stop_button_folded, alignment=Qt.AlignmentFlag.AlignTop)
         self.restart_button_folded = QPushButton("Restart")
         self.restart_button_folded.setFixedSize(self.button_width, self.button_height)
+        self.restart_button_folded.setCursor(Qt.CursorShape.PointingHandCursor)
         self.restart_button_folded.setEnabled(False)
         self.restart_button_folded.clicked.connect(self.restart_server)
         self.restart_button_folded.setStyleSheet(button_stylesheet)
@@ -210,7 +224,7 @@ class ServerCopilot(QMainWindow):
         self.server_terminal.setFixedSize(self.width - self.button_height - 37, self.height - self.button_height - 25)
         self.server_terminal.setStyleSheet(f"""QTextEdit {{
                 background-color: #262626;
-                font-family: "{self.custom_font_family}", Arial, sans-serif; 
+                font-family: "{self.body_font_family}", monospace; 
             }}""")
         main_page_layout.addWidget(self.server_terminal, alignment=Qt.AlignmentFlag.AlignTop)
         main_page_layout.addStretch()
@@ -219,11 +233,13 @@ class ServerCopilot(QMainWindow):
         button_layout.setSpacing(5)
         self.stop_button = QPushButton("Stop")
         self.stop_button.setFixedSize(self.button_width, self.button_height)
+        self.stop_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.stop_button.clicked.connect(self.stop_server)
         self.stop_button.setStyleSheet(button_stylesheet)
         button_layout.addWidget(self.stop_button)
         self.restart_button = QPushButton("Restart")
         self.restart_button.setFixedSize(self.button_width, self.button_height)
+        self.restart_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.restart_button.setEnabled(False)
         self.restart_button.clicked.connect(self.restart_server)
         self.restart_button.setStyleSheet(button_stylesheet)
@@ -245,21 +261,40 @@ class ServerCopilot(QMainWindow):
         entry_row_layout.setSpacing(5)
         self.whitelist_entry = QLineEdit()
         self.whitelist_entry.setPlaceholderText("Enter player name or UUID")
+        self.whitelist_entry.setStyleSheet(f"""
+            QLineEdit {{
+                font-family: "{self.body_font_family}", Arial, sans-serif;
+                font-size: 14px;
+                padding: 8px;
+                border: 1px solid #444;
+                border-radius: 4px;
+                background-color: #2d2d2d;
+                color: white;
+            }}
+        """)
         entry_row_layout.addWidget(self.whitelist_entry)
         add_btn = QPushButton("+")
         add_btn.setFixedWidth(32)
-        add_btn.setStyleSheet("QPushButton { background-color: #2e7d32; color: white; font-size: 18px; border-radius: 8px; } QPushButton:hover { background-color: #388e3c; }")
+        add_btn.setStyleSheet(f"QPushButton {{ background-color: #2e7d32; color: white; font-size: 18px; font-family: '{self.title_font_family}', Arial, sans-serif; border-radius: 8px; }} QPushButton:hover {{ background-color: #388e3c; }}")
         add_btn.clicked.connect(self.add_player)
         entry_row_layout.addWidget(add_btn)
         remove_btn = QPushButton("-")
         remove_btn.setFixedWidth(32)
-        remove_btn.setStyleSheet("QPushButton { background-color: #c62828; color: white; font-size: 18px; border-radius: 8px; } QPushButton:hover { background-color: #b71c1c; }")
+        remove_btn.setStyleSheet(f"QPushButton {{ background-color: #c62828; color: white; font-size: 18px; font-family: '{self.title_font_family}', Arial, sans-serif; border-radius: 8px; }} QPushButton:hover {{ background-color: #b71c1c; }}")
         remove_btn.clicked.connect(self.remove_player)
         entry_row_layout.addWidget(remove_btn)
         whitelist_page_layout.addWidget(entry_row, alignment=Qt.AlignmentFlag.AlignTop)
 
         # Settings page
         settings_page = QLabel("Settings Page")
+        settings_page.setStyleSheet(f"""
+            QLabel {{
+                font-family: "{self.title_font_family}", Arial, sans-serif;
+                font-size: 24px;
+                color: white;
+                padding: 20px;
+            }}
+        """)
         self.stacked_widget.addWidget(main_page_folded)
         self.stacked_widget.addWidget(main_page)
         self.stacked_widget.addWidget(whitelist_page)
@@ -340,6 +375,7 @@ class ServerCopilot(QMainWindow):
         self.folded_in = False
         self.main_button.show()
         self.whitelist_button.show()
+        self.help_button.show()
         self.settings_button.show()
 
     def fold_in(self):
@@ -358,6 +394,7 @@ class ServerCopilot(QMainWindow):
         self.folded_in = True
         self.main_button.hide()
         self.whitelist_button.hide()
+        self.help_button.hide()
         self.settings_button.hide()
 
     def start_server(self):
@@ -463,18 +500,39 @@ class ServerCopilot(QMainWindow):
         self.tray_icon = QSystemTrayIcon(icon, self)
         self.tray_icon.setToolTip(self.server.name)
         menu = QMenu()
-        menu.setStyleSheet("""
-            QMenu::separator {
+        menu.setStyleSheet(f"""
+            QMenu {{
+                font-family: "{self.body_font_family}", Arial, sans-serif;
+                font-size: 12px;
+                background-color: #2d2d30;
+                color: white;
+                border: 1px solid #454545;
+            }}
+            QMenu::item {{
+                padding: 8px 24px;
+            }}
+            QMenu::item:selected {{
+                background-color: #094771;
+            }}
+            QMenu::separator {{
                 height: 2px;
                 background: #252526;
                 margin: 4px 8px;
-            }""")
+            }}""")
 
         widget = QWidget()
         layout = QHBoxLayout()
         image_label = QLabel()
         image_label.setPixmap(icon.pixmap(16, 16))
         text_label = QLabel(self.server.name)
+        text_label.setStyleSheet(f"""
+            QLabel {{
+                font-family: "{self.title_font_family}", Arial, sans-serif;
+                font-size: 12px;
+                color: white;
+                padding: 4px;
+            }}
+        """)
         layout.addWidget(image_label)
         layout.addWidget(text_label)
         widget.setLayout(layout)
@@ -552,6 +610,7 @@ class ServerCopilot(QMainWindow):
                 if not self.server.in_startup:
                     print("└─ Server has started, quitting now.")
                     self.quit_after_startup = True
+                    self.stop_server()
                     self.quit_window()
                     return
                 else:

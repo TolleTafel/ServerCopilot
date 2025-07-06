@@ -30,13 +30,13 @@ class Whitelist(QWidget):
 
         self.whitelist_default_button = QPushButton("Default")
         self.whitelist_default_button.setFixedHeight(self.main_button_height)
-        self.whitelist_default_button.setStyleSheet(f"font-size: 16px; padding: 8px 18px; font-family: '{self.app.custom_font_family}', Arial, sans-serif;")
+        self.whitelist_default_button.setStyleSheet(f"font-size: 16px; padding: 8px 18px; font-family: '{self.app.title_font_family}', Arial, sans-serif;")
         self.whitelist_default_button.clicked.connect(self.toggle_whitelist)
         button_row.addWidget(self.whitelist_default_button)
 
         self.whitelist_guest_button = QPushButton("Guest")
         self.whitelist_guest_button.setFixedHeight(self.main_button_height)
-        self.whitelist_guest_button.setStyleSheet(f"font-size: 16px; padding: 8px 18px; font-family: '{self.app.custom_font_family}', Arial, sans-serif;")
+        self.whitelist_guest_button.setStyleSheet(f"font-size: 16px; padding: 8px 18px; font-family: '{self.app.title_font_family}', Arial, sans-serif;")
         self.whitelist_guest_button.clicked.connect(self.toggle_whitelist)
         button_row.addWidget(self.whitelist_guest_button)
 
@@ -108,7 +108,7 @@ class Whitelist(QWidget):
                 switch_default.stateChanged.connect(lambda state, p=player, t="default": self.toggle_player(p, t))
                 button_default = QPushButton(player)
                 button_default.clicked.connect(button_click_action)
-                button_default.setStyleSheet("font-size: 14px; padding: 8px 18px; text-align: left;")
+                button_default.setStyleSheet(f"font-size: 14px; padding: 8px 18px; text-align: left; font-family: '{self.app.body_font_family}', Arial, sans-serif;")
                 default_layout.addWidget(switch_default)
                 default_layout.addWidget(button_default)
                 default_layout.addStretch(1)
@@ -128,7 +128,7 @@ class Whitelist(QWidget):
                 switch_guest.stateChanged.connect(lambda state, p=player, t="guest": self.toggle_player(p, t))
                 button_guest = QPushButton(player)
                 button_guest.clicked.connect(button_click_action)
-                button_guest.setStyleSheet("font-size: 14px; padding: 8px 18px; text-align: left;")
+                button_guest.setStyleSheet(f"font-size: 14px; padding: 8px 18px; text-align: left; font-family: '{self.app.body_font_family}', Arial, sans-serif;")
                 guest_layout.addWidget(switch_guest)
                 guest_layout.addWidget(button_guest)
                 guest_layout.addStretch(1)
