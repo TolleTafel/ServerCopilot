@@ -1,13 +1,11 @@
-from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QMessageBox,
-    QTextEdit, QLabel, QMenu, QLineEdit, QFrame, QWidgetAction, QSystemTrayIcon,
-    QStackedWidget, QWIDGETSIZE_MAX)
+from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QMessageBox, QTextEdit, QLabel, QMenu, QLineEdit, QFrame, QWidgetAction, QSystemTrayIcon, QStackedWidget, QWIDGETSIZE_MAX
 from PyQt6.QtGui import QIcon, QAction, QTextCursor, QGuiApplication, QFontDatabase, QDesktopServices
 from widgets.sidebar_button import SidebarButtonWithMarker, SidebarButton
 from tools.terminal_output_worker import TerminalOutputWorker
-from PyQt6.QtCore import Qt, QTimer, QSize, QEvent, QThread, QUrl
+from PyQt6.QtCore import Qt, QTimer, QSize, QEvent, QThread, QUrl, pyqtSignal, pyqtSlot
 from widgets.confirm_dialogue import confirm_dialogue
 from tools.instance_checker import SingleInstance
+from tools.remote_listener import RemoteListener
 from startup import startup, change_shortcut
 from widgets.whitelist import Whitelist
 from server import Server
@@ -16,6 +14,9 @@ import sys
 import os
 
 class ServerCopilot(QMainWindow):
+    remote_stop_requested = pyqtSignal()
+    instance_message_received = pyqtSignal(str)
+    
     def __init__(self, window_width: int = 25, window_height: int = 25):
         print("Creating ServerCopilot instance ...")
         super().__init__()
@@ -44,6 +45,8 @@ class ServerCopilot(QMainWindow):
         self.terminal_worker = None
         self.terminal_worker_thread = None
         self.quit_after_startup = False
+        self.remote_stop_in_progress = False
+        self.waiting_for_startup = False
         
         # Font system: BowerBold for titles (buttons, headings), Times New Roman for body text (inputs, terminal, menus)
         self.title_font_family = "Arial"  # Fallback for titles
@@ -56,6 +59,16 @@ class ServerCopilot(QMainWindow):
                 self.title_font_family = font_families[0]
         else:
             print("Failed to load Not-Bower-Bold.ttf font file")
+            
+        self.listener = RemoteListener(self)
+        self.listener.listen()
+        
+        # Connect the remote stop signal to the stop_server slot
+        self.remote_stop_requested.connect(self.stop_server)
+        
+        # Connect the instance message signal to the handler slot
+        self.instance_message_received.connect(self.handle_instance_message)
+        
         self.lock_instance()
         self.init_ui()
         self.fold_in()
@@ -64,11 +77,25 @@ class ServerCopilot(QMainWindow):
     def lock_instance(self):
         self.instance_locker = SingleInstance(self, "ServerCopilotMutex" + self.server.name.replace(" ", "_"))
         if not self.instance_locker.is_running():
-            self.instance_locker.start_message_listener(self.check_for_instance_messages)
+            self.instance_locker.start_message_listener(self.emit_instance_message)
         else:
             print("Already running! Sending data ...")
             self.instance_locker.send_message_to_instance("new instance started")
             raise SystemExit
+    
+    def emit_instance_message(self, message):
+        """Emit signal from background thread to be handled on main thread"""
+        self.instance_message_received.emit(message)
+    
+    @pyqtSlot(str)
+    def handle_instance_message(self, message):
+        """Handle instance messages on the main thread"""
+        if message == "new instance started":
+            message = None
+            if self.server.running:
+                self.quit_window()
+            else:
+                self.start_server()
     
     def init_ui(self):
         print("Initialising UI ...")
@@ -347,6 +374,24 @@ class ServerCopilot(QMainWindow):
     def update_terminal(self, line):
         if "[Server thread/INFO]: Done" in line:
             self.server.change_startup_state()
+        elif "[ServerMain/ERROR]: Failed to start the minecraft server" in line and not self.quit_after_startup:
+            self.server.in_startup = False
+            self.server.running = False
+            self.update_terminal("[ServerCopilot]: Failed to start your Server\n")
+            if not self.server.has_icon:
+                change_shortcut(self.shortcut_name, "main_dark.ico", "Start " + self.server.name + " with the ServerCopilot")
+            else:
+                change_shortcut(self.shortcut_name, "server_dorment.ico", "Start " + self.server.name + " with the ServerCopilot")
+            self.setWindowIcon(QIcon(os.path.join(self.icon_folder, "main_dark.ico")) if not self.server.has_icon else QIcon(os.path.join(self.icon_folder, "server_dorment.ico")))
+            self.stop_button.setText("Start")
+            self.stop_button_folded.setText("Start")
+            self.stop_button.clicked.disconnect()
+            self.stop_button.clicked.connect(self.start_server)
+            self.restart_button.setEnabled(False)
+            self.restart_button_folded.setEnabled(False)
+            if confirm_dialogue(self.server, "ServerCopilot Error", "Failed to start the server.\nThis issue may be caused by the server running in another process.\nDo you want to quit the ServerCopilot?", QMessageBox.Icon.Critical):
+                self.quit_window()
+            return
         self.terminal_content.append(line)
         self.server_terminal.setPlainText("".join(self.terminal_content))
         self.server_terminal.moveCursor(QTextCursor.MoveOperation.End)
@@ -401,9 +446,9 @@ class ServerCopilot(QMainWindow):
         print("Starting server")
         self.update_terminal("[ServerCopilot]: Starting your Server\n")
         if not self.server.has_icon:
-            change_shortcut(self.shortcut_name, "main_running.ico", "Stop " + self.server.name)
+            change_shortcut(self.shortcut_name, "main_running.ico", "Stop " + self.server.name + " with the ServerCopilot")
         else:
-            change_shortcut(self.shortcut_name, "server.ico", "Stop " + self.server.name)
+            change_shortcut(self.shortcut_name, "server.ico", "Stop " + self.server.name + " with the ServerCopilot")
         print("└─ Sending Start signal")
         self.server.start_server(3000)
         self.terminate_thread = False
@@ -431,7 +476,16 @@ class ServerCopilot(QMainWindow):
         self.restart_button_folded.setEnabled(True)
         print("└─ Server started successfully")
 
+    @pyqtSlot()
     def stop_server(self):
+        caller_name = self.sender()
+        if caller_name == self.remote_stop_requested:
+            if self.remote_stop_in_progress:
+                print("└─ Remote stop already in progress, ignoring duplicate request")
+                return
+            self.remote_stop_in_progress = True
+            print("└─ Processing remote stop request")
+        
         print("Stopping server...")
         if not self.server.in_startup:
             self.update_terminal("[ServerCopilot]: Stopped your Server\n")
@@ -447,9 +501,9 @@ class ServerCopilot(QMainWindow):
             print("└─ Sending Stop signal")
             self.server.write_to_server("stop")
             if not self.server.has_icon:
-                change_shortcut(self.shortcut_name, "main_dark.ico", "Start " + self.server.name)
+                change_shortcut(self.shortcut_name, "main_dark.ico", "Start " + self.server.name + " with the ServerCopilot")
             else:
-                change_shortcut(self.shortcut_name, "server_dorment.ico", "Start " + self.server.name)
+                change_shortcut(self.shortcut_name, "server_dorment.ico", "Start " + self.server.name + " with the ServerCopilot")
             self.setWindowIcon(QIcon(os.path.join(self.icon_folder, "main_dark.ico")) if not self.server.has_icon else QIcon(os.path.join(self.icon_folder, "server_dorment.ico")))
             self.stop_button.setText("Start")
             self.stop_button_folded.setText("Start")
@@ -457,8 +511,21 @@ class ServerCopilot(QMainWindow):
             self.stop_button.clicked.connect(self.start_server)
             self.restart_button.setEnabled(False)
             self.restart_button_folded.setEnabled(False)
+            if self.waiting_for_startup:
+                self.stop_button.setEnabled(True)
+                self.stop_button_folded.setEnabled(True)
+                self.waiting_for_startup = False
             print("└─ Server stopped successfully")
+            
+            # Reset the remote stop flag
+            self.remote_stop_in_progress = False
         else:
+            if not self.waiting_for_startup:
+                self.stop_button.setEnabled(False)
+                self.stop_button_folded.setEnabled(False)
+                self.restart_button.setEnabled(False)
+                self.update_terminal("[ServerCopilot]: Waiting for server to start up before stopping\n")
+                self.waiting_for_startup = True
             QTimer.singleShot(500, self.stop_server)
 
     def restart_server(self):
@@ -587,51 +654,42 @@ class ServerCopilot(QMainWindow):
             self.stop_button.clicked.connect(self.start_server)
             self.restart_button.setEnabled(False)
 
-    def check_for_instance_messages(self, message):
-        if message == "new instance started":
-            message = None
-            if self.server.running:
-                if self.tray_icon:
-                    self.quit_window()
-                else:
-                    self.stop_server()
-            else:
-                self.start_server()
-
     def quit_window(self):
-        print("Quitting ServerCopilot...")
-        if self.server.in_startup:
-            if not confirm_dialogue(self.server, "Quit ServerCopilot?", "Your server is currently starting up. Do you want to quit as soon as the server has started?", QMessageBox.Icon.Warning):
-                print("└─ User cancelled quit operation")
-                return
-            print("└─ Will quit as soon as the server has started.")
-            def check_and_quit():
-                print("└─ Checking if server has started...")
-                if not self.server.in_startup:
-                    print("└─ Server has started, quitting now.")
-                    self.quit_after_startup = True
-                    self.stop_server()
-                    self.quit_window()
+            print("Quitting ServerCopilot...")
+            if self.server.in_startup:
+                if self.tray_icon:
+                    self.maximize_from_tray()
+                if not confirm_dialogue(self.server, "Quit ServerCopilot?", "Your server is currently starting up. Do you want to quit as soon as the server has started?", QMessageBox.Icon.Warning):
+                    print("└─ User cancelled quit operation")
                     return
-                else:
-                    QTimer.singleShot(500, check_and_quit)
-            QTimer.singleShot(500, check_and_quit)
-            return
-        elif self.server.running and not self.quit_after_startup:
-            if not confirm_dialogue(self.server, "Quit ServerCopilot?", "Your server is currently running. Are you sure you want to quit?", QMessageBox.Icon.Warning):
-                print("└─ User cancelled quit operation")
+                print("└─ Will quit as soon as the server has started.")
+                def check_and_quit():
+                    print("└─ Checking if server has started...")
+                    if not self.server.in_startup:
+                        print("└─ Server has started, quitting now.")
+                        self.quit_after_startup = True
+                        self.stop_server()
+                        self.quit_window()
+                        return
+                    else:
+                        QTimer.singleShot(500, check_and_quit)
+                QTimer.singleShot(500, check_and_quit)
                 return
-            self.stop_server()
-            change_shortcut(self.shortcut_name, "server_dorment.ico", "Start " + self.server.name)
-        if self.tray_icon:
-            print("└─ Quitting tray process")
-            self.tray_icon.hide()
-            self.tray_icon = None
-        self.save_settings()
-        self.instance_locker.release()
-        print("└─ Quit process successful. Until next time, then.")
-        QApplication.quit()
-        raise SystemExit
+            elif self.server.running and not self.quit_after_startup:
+                if not confirm_dialogue(self.server, "Quit ServerCopilot?", "Your server is currently running. Are you sure you want to quit?", QMessageBox.Icon.Warning):
+                    print("└─ User cancelled quit operation")
+                    return
+                self.stop_server()
+                change_shortcut(self.shortcut_name, "server_dorment.ico", "Start " + self.server.name)
+            if self.tray_icon:
+                print("└─ Quitting tray process")
+                self.tray_icon.hide()
+                self.tray_icon = None
+            self.save_settings()
+            self.instance_locker.release()
+            print("└─ Quit process successful. Until next time, then.")
+            QApplication.quit()
+            raise SystemExit
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

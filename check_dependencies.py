@@ -5,7 +5,8 @@ def check_and_install_dependencies():
     required_packages = [
         "PyQt6",
         "winshell",
-        "mojang"
+        "mojang",
+        "firebase_admin"
     ]
 
     for package in required_packages:
