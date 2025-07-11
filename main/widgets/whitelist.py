@@ -1,8 +1,8 @@
-from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QCheckBox, QFrame, QMessageBox, QScrollArea, QSizePolicy)
-from mojang import API
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QCheckBox, QFrame, QMessageBox, QScrollArea, QSizePolicy
 from .confirm_dialogue import confirm_dialogue
 from collections import namedtuple
+from PyQt6.QtCore import Qt
+from mojang import API
 import json
 import os
 
@@ -11,9 +11,10 @@ button_element = namedtuple("button_element", ["frame", "switch", "button", "typ
 api = API()
 
 class Whitelist(QWidget):
-    def __init__(self, master, main_button_height=72, width=200, height=200, **kwargs):
+    def __init__(self, master, colors, main_button_height=72, width=200, height=200, **kwargs):
         super().__init__(master)
         self.app = master
+        self.colors = colors
         self.width = width
         self.height = height
         self.main_button_height = main_button_height
@@ -26,17 +27,23 @@ class Whitelist(QWidget):
 
     def init_ui(self):
         layout = QVBoxLayout(self)
+        
+        # Set main widget background color
+        self.setStyleSheet(f"background-color: {self.colors['background']};")
+        
         button_row = QHBoxLayout()
 
         self.whitelist_default_button = QPushButton("Default")
-        self.whitelist_default_button.setFixedHeight(self.main_button_height)
-        self.whitelist_default_button.setStyleSheet(f"font-size: 16px; padding: 8px 18px; font-family: '{self.app.title_font_family}', Arial, sans-serif;")
+        self.whitelist_default_button.setFixedHeight(self.main_button_height//2)
+        self.whitelist_default_button.setStyleSheet(f"QPushButton {{ font-size: 16px; padding: 8px 18px; font-family: '{self.app.title_font_family}', Arial, sans-serif; background-color: {self.colors['button']}; border: 0px solid transparent; border-radius: 0px; }} QPushButton:hover {{ background-color: {self.colors.get('button_hover', '#3a3d42')}; }}")
+        self.whitelist_default_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.whitelist_default_button.clicked.connect(self.toggle_whitelist)
         button_row.addWidget(self.whitelist_default_button)
 
         self.whitelist_guest_button = QPushButton("Guest")
-        self.whitelist_guest_button.setFixedHeight(self.main_button_height)
-        self.whitelist_guest_button.setStyleSheet(f"font-size: 16px; padding: 8px 18px; font-family: '{self.app.title_font_family}', Arial, sans-serif;")
+        self.whitelist_guest_button.setFixedHeight(self.main_button_height//2)
+        self.whitelist_guest_button.setStyleSheet(f"QPushButton {{ font-size: 16px; padding: 8px 18px; font-family: '{self.app.title_font_family}', Arial, sans-serif; background-color: {self.colors['button']}; border: 0px solid transparent; border-radius: 0px; }} QPushButton:hover {{ background-color: {self.colors.get('button_hover', '#3a3d42')}; }}")
+        self.whitelist_guest_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.whitelist_guest_button.clicked.connect(self.toggle_whitelist)
         button_row.addWidget(self.whitelist_guest_button)
 
@@ -44,21 +51,25 @@ class Whitelist(QWidget):
 
         # Scroll areas for player lists
         self.whitelist_default_list = QScrollArea()
+        self.whitelist_default_list.setStyleSheet(f"QScrollArea {{ background-color: {self.colors['button']}; border: none; border-radius: 12px; }} QScrollArea > QWidget > QWidget {{ background-color: {self.colors['foreground']}; }}")
         self.whitelist_default_list.setWidgetResizable(True)
-        self.whitelist_default_list.setFixedHeight(self.height - self.main_button_height)
+        self.whitelist_default_list.setFixedHeight(self.height - self.main_button_height//2 - 18)
         self.default_list_widget = QWidget()
+        self.default_list_widget.setStyleSheet(f"background-color: {self.colors['button']};")
         self.default_list_layout = QVBoxLayout(self.default_list_widget)
         self.default_list_layout.setSpacing(0)
-        self.default_list_layout.setContentsMargins(0, 0, 0, 0)
+        self.default_list_layout.setContentsMargins(0, 0, 0, 5)
         self.whitelist_default_list.setWidget(self.default_list_widget)
 
         self.whitelist_guest_list = QScrollArea()
+        self.whitelist_guest_list.setStyleSheet(f"QScrollArea {{ background-color: {self.colors['button']}; border: none; border-radius: 12px; }} QScrollArea > QWidget > QWidget {{ background-color: {self.colors['foreground']}; }}")
         self.whitelist_guest_list.setWidgetResizable(True)
-        self.whitelist_guest_list.setFixedHeight(self.height - self.main_button_height)
+        self.whitelist_guest_list.setFixedHeight(self.height - self.main_button_height//2 - 18)
         self.guest_list_widget = QWidget()
+        self.guest_list_widget.setStyleSheet(f"background-color: {self.colors['button']};")
         self.guest_list_layout = QVBoxLayout(self.guest_list_widget)
         self.guest_list_layout.setSpacing(0)
-        self.guest_list_layout.setContentsMargins(0, 0, 0, 0)
+        self.guest_list_layout.setContentsMargins(0, 0, 0, 5)
         self.whitelist_guest_list.setWidget(self.guest_list_widget)
 
         lists_row = QHBoxLayout()
@@ -102,13 +113,14 @@ class Whitelist(QWidget):
                         self.app.whitelist_entry.setText(p)
                 default_frame = QFrame()
                 default_layout = QHBoxLayout(default_frame)
-                default_layout.setContentsMargins(0, 0, 0, 0)
+                default_layout.setContentsMargins(10, 5, 0, 0)
                 switch_default = QCheckBox()
                 switch_default.setChecked(player in self.default_whitelist)
                 switch_default.stateChanged.connect(lambda state, p=player, t="default": self.toggle_player(p, t))
                 button_default = QPushButton(player)
                 button_default.clicked.connect(button_click_action)
-                button_default.setStyleSheet(f"font-size: 14px; padding: 8px 18px; text-align: left; font-family: '{self.app.body_font_family}', Arial, sans-serif;")
+                button_default.setCursor(Qt.CursorShape.PointingHandCursor)
+                button_default.setStyleSheet(f"QPushButton {{ font-size: 14px; padding: 8px 18px; text-align: left; font-family: '{self.app.body_font_family}', Arial, sans-serif; background-color: transparent; border: 0px solid transparent; }} QPushButton:hover {{ background-color: {self.colors.get('button_hover', 'rgba(255, 255, 255, 0.1)')}; }}")
                 default_layout.addWidget(switch_default)
                 default_layout.addWidget(button_default)
                 default_layout.addStretch(1)
@@ -122,13 +134,14 @@ class Whitelist(QWidget):
                         self.app.whitelist_entry.setText(p)
                 guest_frame = QFrame()
                 guest_layout = QHBoxLayout(guest_frame)
-                guest_layout.setContentsMargins(0, 0, 0, 0)
+                guest_layout.setContentsMargins(10, 5, 0, 0)
                 switch_guest = QCheckBox()
                 switch_guest.setChecked(player in self.guest_whitelist)
                 switch_guest.stateChanged.connect(lambda state, p=player, t="guest": self.toggle_player(p, t))
                 button_guest = QPushButton(player)
                 button_guest.clicked.connect(button_click_action)
-                button_guest.setStyleSheet(f"font-size: 14px; padding: 8px 18px; text-align: left; font-family: '{self.app.body_font_family}', Arial, sans-serif;")
+                button_guest.setCursor(Qt.CursorShape.PointingHandCursor)
+                button_guest.setStyleSheet(f"QPushButton {{ font-size: 14px; padding: 8px 18px; text-align: left; font-family: '{self.app.body_font_family}', Arial, sans-serif; background-color: transparent; border: 0px solid transparent; }} QPushButton:hover {{ background-color: {self.colors.get('button_hover', 'rgba(255, 255, 255, 0.1)')}; }}")
                 guest_layout.addWidget(switch_guest)
                 guest_layout.addWidget(button_guest)
                 guest_layout.addStretch(1)
