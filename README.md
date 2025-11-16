@@ -118,4 +118,4 @@ By downloading, installing, or using ServerCopilot, you acknowledge that you hav
 
 ---
 
-**Copyright Notice**: ServerCopilot © [Year]. All rights reserved. Minecraft® is a trademark of Mojang AB/Microsoft Corporation.
+**Copyright Notice**: ServerCopilot © 2025. All rights reserved. Minecraft® is a trademark of Mojang AB/Microsoft Corporation.
